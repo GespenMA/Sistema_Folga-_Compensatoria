@@ -382,7 +382,7 @@ export const Ciclos: React.FC = () => {
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '16px' }}>📅</span>
-                    <span><strong>Vigência:</strong> {new Date(ciclo.data_inicio).toLocaleDateString('pt-BR')} a {new Date(ciclo.data_fim).toLocaleDateString('pt-BR')}</span>
+                    <span><strong>Vigência:</strong> {new Date(ciclo.data_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(ciclo.data_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '16px' }}>📊</span>

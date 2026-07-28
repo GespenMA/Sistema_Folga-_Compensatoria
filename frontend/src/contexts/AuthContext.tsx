@@ -9,6 +9,7 @@ type Profile = {
   perfil: 'ADMIN' | 'ESTABELECIMENTO' | 'GESTAO';
   establishment_id: string | null;
   ativo: boolean;
+  establishments?: { nome: string };
 };
 
 type AuthContextType = {
@@ -59,7 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, establishments(nome)')
         .eq('id', userId)
         .single();
         

@@ -35,7 +35,7 @@ export type CycleCardProps = {
   onReopen: (cycleId: string) => void;
 };
 
-const formatDate = (value: string) => new Date(value).toLocaleDateString('pt-BR');
+const formatDate = (value: string) => new Date(value + 'T12:00:00Z').toLocaleDateString('pt-BR');
 
 const getStatusIcon = (status: CycleStatus) => {
   const iconProps = { size: 18, strokeWidth: 1.8, 'aria-hidden': true };

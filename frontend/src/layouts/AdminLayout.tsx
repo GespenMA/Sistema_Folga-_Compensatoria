@@ -15,7 +15,7 @@ export const AdminLayout: React.FC = () => {
     { path: '/admin', label: '📊 Dashboard' },
     { path: '/admin/estabelecimentos', label: '🏢 Estabelecimentos' },
     { path: '/admin/ciclos', label: '🔄 Ciclos' },
-    { path: '/admin/solicitacoes', label: '📝 Solicitações' }
+    { path: '/admin/relatorios', label: '💰 Folha Pagamento' }
   ];
 
   const navItems = profile?.perfil === 'ADMIN' 

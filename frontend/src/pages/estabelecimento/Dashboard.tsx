@@ -8,6 +8,8 @@ export const EstabelecimentoDashboard: React.FC = () => {
   const [activeCycle, setActiveCycle] = useState<any>(null);
   const [cycleEst, setCycleEst] = useState<any>(null);
   const [limits, setLimits] = useState<any[]>([]);
+  const [purchaseRequests, setPurchaseRequests] = useState<any[]>([]);
+  const [estName, setEstName] = useState<string>('');
 
   useEffect(() => {
     if (profile?.establishment_id) {
@@ -18,6 +20,15 @@ export const EstabelecimentoDashboard: React.FC = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
+      // Busca o nome do estabelecimento independente do ciclo
+      const { data: estInfo } = await supabase
+        .from('establishments')
+        .select('nome')
+        .eq('id', profile!.establishment_id)
+        .single();
+        
+      if (estInfo) setEstName(estInfo.nome);
+
       // 1. Check for open cycle
       const { data: cycleData, error: cycleError } = await supabase
         .from('cycles')
@@ -54,6 +65,21 @@ export const EstabelecimentoDashboard: React.FC = () => {
 
           if (limitsError) throw limitsError;
           if (limitsData) setLimits(limitsData);
+          
+          // 4. Fetch purchase requests to calculate totals
+          const { data: requests, error: reqError } = await supabase
+            .from('purchase_requests')
+            .select(`
+              valor,
+              position_id,
+              positions ( codigo )
+            `)
+            .eq('cycle_id', cycleData.id)
+            .eq('establishment_id', profile!.establishment_id)
+            .in('status', ['SOLICITADA', 'APROVADA']);
+
+          if (reqError) throw reqError;
+          if (requests) setPurchaseRequests(requests);
         }
       }
     } catch (err: any) {
@@ -68,12 +94,20 @@ export const EstabelecimentoDashboard: React.FC = () => {
     return l ? l.quantidade_planejada : 0;
   };
 
+  const getConsumido = (codigo: string) => {
+    return purchaseRequests.filter(r => r.positions?.codigo === codigo).length;
+  };
+  
+  const totalGasto = purchaseRequests.reduce((acc, curr) => acc + Number(curr.valor), 0);
+  const totalOrcado = cycleEst?.total_orcado || 0;
+  const saldoDisponivel = totalOrcado - totalGasto;
+
   if (loading) return <div>Carregando painel...</div>;
 
   return (
     <div>
       <div style={{ marginBottom: 'var(--space-6)' }}>
-        <h2 style={{ margin: 0 }}>Dashboard da Unidade Penal</h2>
+        <h2 style={{ margin: 0 }}>Dashboard do Estabelecimento Penal {estName ? `- ${estName}` : ''}</h2>
         <p className="text-muted" style={{ margin: 0 }}>
           Bem-vindo, {profile?.nome}. Acompanhe aqui os recursos liberados para sua unidade.
         </p>
@@ -107,10 +141,11 @@ export const EstabelecimentoDashboard: React.FC = () => {
                 Orçamento Liberado
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600 }}>
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cycleEst.total_orcado)}
+                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalOrcado)}
               </div>
-              <div style={{ fontSize: '12px', marginTop: '8px', opacity: 0.8 }}>
-                Ciclo: {activeCycle.nome}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: '16px', opacity: 0.9, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '8px' }}>
+                <span>Gasto: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalGasto)}</span>
+                <span style={{ fontWeight: 600 }}>Saldo: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(saldoDisponivel)}</span>
               </div>
             </div>
 
@@ -121,8 +156,9 @@ export const EstabelecimentoDashboard: React.FC = () => {
                 Cota - Inspetores
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600, color: 'var(--color-text)' }}>
-                {getLimit('INSP')} <span style={{ fontSize: '16px', color: 'var(--color-text-muted)', fontWeight: 400 }}>folgas</span>
+                {getConsumido('INSP')} / {getLimit('INSP')} <span style={{ fontSize: '16px', color: 'var(--color-text-muted)', fontWeight: 400 }}>folgas</span>
               </div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '8px' }}>Consumo da cota liberada</div>
             </div>
 
             {/* CARD AGENTE */}
@@ -132,8 +168,9 @@ export const EstabelecimentoDashboard: React.FC = () => {
                 Cota - Agentes (APT)
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600, color: 'var(--color-text)' }}>
-                {getLimit('APT')} <span style={{ fontSize: '16px', color: 'var(--color-text-muted)', fontWeight: 400 }}>folgas</span>
+                {getConsumido('APT')} / {getLimit('APT')} <span style={{ fontSize: '16px', color: 'var(--color-text-muted)', fontWeight: 400 }}>folgas</span>
               </div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '8px' }}>Consumo da cota liberada</div>
             </div>
 
             {/* CARD AUXILIAR */}
@@ -143,8 +180,9 @@ export const EstabelecimentoDashboard: React.FC = () => {
                 Cota - Auxiliares (ASP)
               </div>
               <div style={{ fontSize: '32px', fontWeight: 600, color: 'var(--color-text)' }}>
-                {getLimit('ASP')} <span style={{ fontSize: '16px', color: 'var(--color-text-muted)', fontWeight: 400 }}>folgas</span>
+                {getConsumido('ASP')} / {getLimit('ASP')} <span style={{ fontSize: '16px', color: 'var(--color-text-muted)', fontWeight: 400 }}>folgas</span>
               </div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '8px' }}>Consumo da cota liberada</div>
             </div>
 
           </div>
@@ -152,7 +190,7 @@ export const EstabelecimentoDashboard: React.FC = () => {
           <div className="blueprint card elev-sm" style={{ padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
             <h3 style={{ margin: '0 0 var(--space-4) 0' }}>Mural de Avisos</h3>
             <p style={{ color: 'var(--color-text-muted)', fontSize: '14px', lineHeight: '1.6' }}>
-              <strong>Atenção:</strong> As solicitações de compra de folgas devem ser realizadas até o final da vigência deste ciclo ({new Date(activeCycle.data_fim).toLocaleDateString('pt-BR')}).<br/>
+              <strong>Atenção:</strong> As solicitações de compra de folgas devem ser realizadas até o final da vigência deste ciclo ({new Date(activeCycle.data_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}).<br/>
               Acompanhe seu limite de cotas para não ultrapassar o orçamento planejado para a sua unidade.
             </p>
           </div>

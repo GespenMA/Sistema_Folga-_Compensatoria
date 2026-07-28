@@ -9,11 +9,14 @@ import { AdminDashboard } from './pages/AdminDashboard';
 import { Estabelecimentos } from './pages/admin/Estabelecimentos';
 import { Configuracoes } from './pages/admin/Configuracoes';
 import { Ciclos } from './pages/admin/Ciclos';
+import { Relatorios } from './pages/admin/Relatorios';
 
 // Importações do módulo Estabelecimento
 import { EstabelecimentoLayout } from './layouts/EstabelecimentoLayout';
 import { EstabelecimentoDashboard } from './pages/estabelecimento/Dashboard';
 import { Servidores } from './pages/estabelecimento/Servidores';
+import { Folgas } from './pages/estabelecimento/Folgas';
+import { Solicitacoes } from './pages/estabelecimento/Solicitacoes';
 
 // Componente para rotas protegidas
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: ('ADMIN' | 'ESTABELECIMENTO' | 'GESTAO')[] }) => {
@@ -68,6 +71,7 @@ function App() {
             <Route index element={<AdminDashboard />} />
             <Route path="ciclos" element={<Ciclos />} />
             <Route path="estabelecimentos" element={<Estabelecimentos />} />
+            <Route path="relatorios" element={<Relatorios />} />
             <Route 
               path="configuracoes" 
               element={
@@ -89,8 +93,8 @@ function App() {
           >
             <Route index element={<EstabelecimentoDashboard />} />
             <Route path="servidores" element={<Servidores />} />
-            <Route path="folgas" element={<div style={{padding: '2rem'}}>Tela de Folgas em construção</div>} />
-            <Route path="solicitacoes" element={<div style={{padding: '2rem'}}>Tela de Solicitações em construção</div>} />
+            <Route path="folgas" element={<Folgas />} />
+            <Route path="solicitacoes" element={<Solicitacoes />} />
           </Route>
         </Routes>
       </BrowserRouter>
