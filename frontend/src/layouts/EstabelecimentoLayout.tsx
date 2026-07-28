@@ -28,6 +28,7 @@ export const EstabelecimentoLayout: React.FC = () => {
           <Link to="/estabelecimento" style={{ display: 'block', padding: 'var(--space-3) 0', color: 'var(--color-text)', textDecoration: 'none', borderBottom: '1px solid var(--color-divider)' }}>📊 Dashboard</Link>
           <Link to="/estabelecimento/servidores" style={{ display: 'block', padding: 'var(--space-3) 0', color: 'var(--color-text)', textDecoration: 'none', borderBottom: '1px solid var(--color-divider)' }}>👮 Servidores</Link>
           <Link to="/estabelecimento/folgas" style={{ display: 'block', padding: 'var(--space-3) 0', color: 'var(--color-text)', textDecoration: 'none', borderBottom: '1px solid var(--color-divider)' }}>📅 Lançamento de Plantões</Link>
+          <Link to="/estabelecimento/simulador" style={{ display: 'block', padding: 'var(--space-3) 0', color: 'var(--color-text)', textDecoration: 'none', borderBottom: '1px solid var(--color-divider)' }}>🧮 Simulador Orçamentário</Link>
           <Link to="/estabelecimento/solicitacoes" style={{ display: 'block', padding: 'var(--space-3) 0', color: 'var(--color-text)', textDecoration: 'none', borderBottom: '1px solid var(--color-divider)' }}>🛒 Comprar Folga</Link>
         </nav>
 

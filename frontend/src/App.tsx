@@ -17,6 +17,7 @@ import { EstabelecimentoDashboard } from './pages/estabelecimento/Dashboard';
 import { Servidores } from './pages/estabelecimento/Servidores';
 import { Folgas } from './pages/estabelecimento/Folgas';
 import { Solicitacoes } from './pages/estabelecimento/Solicitacoes';
+import { Simulador } from './pages/estabelecimento/Simulador';
 
 // Componente para rotas protegidas
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: ('ADMIN' | 'ESTABELECIMENTO' | 'GESTAO')[] }) => {
@@ -95,6 +96,7 @@ function App() {
             <Route path="servidores" element={<Servidores />} />
             <Route path="folgas" element={<Folgas />} />
             <Route path="solicitacoes" element={<Solicitacoes />} />
+            <Route path="simulador" element={<Simulador />} />
           </Route>
         </Routes>
       </BrowserRouter>
