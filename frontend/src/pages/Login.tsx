@@ -43,7 +43,7 @@ export const Login: React.FC = () => {
         <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
         
         <div className="card-kicker">Sistema de Gestão</div>
-        <h2 style={{ margin: '0 0 var(--space-1)' }}>Folga Compensatória</h2>
+        <h2 style={{ margin: '0 0 var(--space-1)' }}>SIFOC - Sistema Integrado de Folga Compensatória</h2>
         <p className="text-muted" style={{ fontSize: '13px', marginBottom: 'var(--space-4)' }}>
           Entre para acessar o painel da sua unidade ou da Administração.
         </p>

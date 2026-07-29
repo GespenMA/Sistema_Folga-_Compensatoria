@@ -111,7 +111,7 @@ export const Simulador: React.FC = () => {
 
   if (!activeCycle) {
     return (
-      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+      <div style={{ width: '100%' }}>
         <div className="blueprint card" style={{ padding: 'var(--space-6)', textAlign: 'center' }}>
           <h3>Nenhum ciclo aberto</h3>
           <p className="text-muted">Não é possível simular sem um ciclo ativo.</p>
@@ -136,7 +136,7 @@ export const Simulador: React.FC = () => {
   const colorPalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e'];
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       <div style={{ marginBottom: 'var(--space-6)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h2 style={{ margin: '0 0 var(--space-2) 0' }}>Simulador Orçamentário</h2>

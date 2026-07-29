@@ -457,5 +457,150 @@ textarea.input { min-height: 90px; resize: vertical; }
   }
   .cycle-card__primary-actions {
     flex-direction: column;
+}
+}
+
+/* — modern dashboard — */
+.modern-dashboard {
+  display: flex; flex-direction: column; gap: var(--space-6);
+  font-family: var(--font-body);
+}
+.modern-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+}
+.modern-card {
+  background: #ffffff;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--color-divider);
+  display: flex; flex-direction: column;
+}
+.modern-card-title {
+  font-size: 13px; font-weight: 600; color: var(--color-neutral-600);
+  text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px;
+}
+.modern-card-value {
+  font-size: 28px; font-weight: 700; color: var(--color-text); margin: var(--space-2) 0;
+}
+.progress-bar-bg {
+  width: 100%; height: 8px; background: var(--color-neutral-200); border-radius: 4px; overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%; border-radius: 4px;
+}
+.badge {
+  display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.badge-green { background: #dcfce7; color: #166534; }
+.badge-blue { background: #dbeafe; color: #1e40af; }
+.badge-yellow { background: #fef9c3; color: #854d0e; }
+.badge-red { background: #fee2e2; color: #991b1b; }
+.badge-gray { background: #f3f4f6; color: #374151; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
+.action-btn-large {
+  display: flex; align-items: center; gap: 12px; padding: 16px;
+  background: #ffffff; border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md); font-weight: 600; color: var(--color-text);
+  cursor: pointer; transition: all 0.2s; width: 100%; text-align: left;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.action-btn-large:hover {
+  background: var(--color-neutral-100); transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+}
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+
+/* Circle Chart */
+.circle-chart {
+  position: relative; width: 64px; height: 64px; border-radius: 50%;
+  background: conic-gradient(var(--chart-color) var(--chart-pct), var(--color-neutral-200) 0);
+  display: flex; align-items: center; justify-content: center;
+}
+.circle-chart::after {
+  content: ""; position: absolute; width: 48px; height: 48px;
+  background: #ffffff; border-radius: 50%;
+}
+.circle-chart-text {
+  position: absolute; z-index: 1; font-size: 13px; font-weight: 700;
+}
+
+/* — modern table — */
+.modern-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+.modern-table th {
+  padding: var(--space-3) var(--space-5);
+  color: var(--color-neutral-500);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-divider);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  background: #f8fafc;
+}
+.modern-table td {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-divider);
+  vertical-align: middle;
+}
+.modern-table tr:last-child td {
+  border-bottom: none;
+}
+.modern-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+/* — Responsividade — */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 1024px) {
+  .grid-4 {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
+
+@media (max-width: 768px) {
+  .grid-4, .grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .modern-header {
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+  .modern-header > div:last-child {
+    width: 100%;
+  }
+  .modern-header .modern-card {
+    width: 100%;
+  }
+
+  .mobile-header-bar { display: flex !important; }
+  .app-sidebar {
+    position: fixed !important;
+    top: 0; left: 0; bottom: 0; z-index: 50;
+    width: 260px !important;
+    transform: translateX(0);
+    transition: transform 0.3s ease !important;
+  }
+  .app-sidebar.mobile-hidden {
+    transform: translateX(-100%) !important;
+  }
+  .app-sidebar-backdrop {
+    display: block !important;
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 40;
+  }
+  .desktop-only { display: none !important; }
+  .mobile-only { display: flex !important; }
+}
+.mobile-header-bar { display: none !important; }
+.app-sidebar-backdrop { display: none; }
+.mobile-only { display: none; }
