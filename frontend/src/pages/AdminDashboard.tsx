@@ -1,48 +1,69 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   Wallet, FileText, Landmark, Building2, Calendar, Bell, 
-  Download, FileSpreadsheet, Eye, FilePieChart, 
-  AlertTriangle, AlertCircle, Info, XCircle, ArrowRight
+  Download, FileSpreadsheet, Eye, 
+  AlertTriangle, AlertCircle, Info, ArrowRight
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
 
+type DashboardTab = 'dashboard' | 'detalhamento';
+type UnitStatusFilter = 'Todos' | 'Normal' | 'Atenção' | 'Crítico';
+type LocationFilter = string;
+
 export const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [activeCycle, setActiveCycle] = useState<any>(null);
   const [establishmentsCount, setEstablishmentsCount] = useState({ total: 0, capital: 0, interior: 0 });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'detalhamento'>('dashboard');
+  const [activeTab, setActiveTab] = useState<DashboardTab>('dashboard');
+  const [globalSelectedUnits, setGlobalSelectedUnits] = useState<string[]>([]);
+  const [globalLocations, setGlobalLocations] = useState<string[]>([]);
+  const [globalSearchTerm, setGlobalSearchTerm] = useState('');
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
+  const [searchUnit, setSearchUnit] = useState('');
+  const [statusFilter, setStatusFilter] = useState<UnitStatusFilter>('Todos');
+  const [locationFilter, setLocationFilter] = useState<LocationFilter>('Todos');
+  const tabRefs = useRef<Record<DashboardTab, HTMLButtonElement | null>>({ dashboard: null, detalhamento: null });
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
   
   // Data lists
   const [requests, setRequests] = useState<any[]>([]);
   const [cycleEstablishments, setCycleEstablishments] = useState<any[]>([]);
+  const [allEstablishments, setAllEstablishments] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
         // 1. Ciclo Ativo
-        const { data: ciclos } = await supabase
+        const { data: ciclos, error: ciclosError } = await supabase
           .from('cycles')
           .select('*')
           .eq('status', 'ABERTO')
           .order('data_inicio', { ascending: false })
           .limit(1);
+        if (ciclosError) throw ciclosError;
         
         const ciclo = ciclos && ciclos.length > 0 ? ciclos[0] : null;
         setActiveCycle(ciclo);
 
         // 2. Estabelecimentos
-        const { data: ests } = await supabase
+        const { data: ests, error: establishmentsError } = await supabase
           .from('establishments')
           .select('id, nome, localizacao, ativo')
           .eq('ativo', true);
+        if (establishmentsError) throw establishmentsError;
 
         if (ests) {
+          setAllEstablishments(ests);
           const cap = ests.filter(e => e.localizacao?.toLowerCase() === 'capital').length;
           setEstablishmentsCount({
             total: ests.length,
@@ -53,37 +74,65 @@ export const AdminDashboard: React.FC = () => {
 
         if (ciclo) {
           // 3. Solicitações de compra do ciclo
-          const { data: reqs } = await supabase
+          const { data: reqs, error: requestsError } = await supabase
             .from('purchase_requests')
             .select(`
               id, valor, status, requested_at, establishment_id, position_id
             `)
             .eq('cycle_id', ciclo.id);
+          if (requestsError) throw requestsError;
           if (reqs) setRequests(reqs);
 
           // 4. Orçamentos por estabelecimento
-          const { data: cEsts } = await supabase
+          const { data: cEsts, error: cycleEstablishmentsError } = await supabase
             .from('cycle_establishments')
             .select('establishment_id, total_orcado, establishments(nome, localizacao)')
             .eq('cycle_id', ciclo.id);
+          if (cycleEstablishmentsError) throw cycleEstablishmentsError;
           if (cEsts) setCycleEstablishments(cEsts);
 
           // 5. Cargos para o gráfico de pizza
-          const { data: pos } = await supabase.from('positions').select('id, nome, codigo');
+          const { data: pos, error: positionsError } = await supabase.from('positions').select('id, nome, codigo');
+          if (positionsError) throw positionsError;
           if (pos) setPositions(pos);
+        } else {
+          setRequests([]);
+          setCycleEstablishments([]);
+          setPositions([]);
         }
       } catch (err) {
         console.error("Erro ao buscar dados do dashboard:", err);
+        setErrorMessage('Não foi possível carregar os dados do dashboard. Tente novamente.');
       } finally {
         setLoading(false);
       }
+  }, []);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(event.target as Node)) {
+        setIsLocationDropdownOpen(false);
+      }
     };
-    fetchData();
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // MÉTODOS E CÁLCULOS DERIVADOS
   const today = new Date();
   
+  const availableLocations = useMemo(() => {
+    const locs = new Set(allEstablishments.map(e => e.localizacao).filter(Boolean));
+    return Array.from(locs).sort();
+  }, [allEstablishments]);
+
   const diasRestantes = useMemo(() => {
     if (!activeCycle) return 0;
     const end = new Date(activeCycle.data_fim);
@@ -109,19 +158,46 @@ export const AdminDashboard: React.FC = () => {
 
   const getFormatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
+  const filteredCycleEstablishments = useMemo(() => {
+    let filtered = cycleEstablishments;
+    
+    if (globalLocations.length > 0) {
+      filtered = filtered.filter(ce => globalLocations.includes(ce.establishments?.localizacao));
+    }
+    
+    if (globalSelectedUnits.length > 0) {
+      filtered = filtered.filter(ce => globalSelectedUnits.includes(ce.establishment_id));
+    }
+    return filtered;
+  }, [cycleEstablishments, globalSelectedUnits, globalLocations]);
+
+  const filteredRequests = useMemo(() => {
+    let filtered = requests;
+    
+    if (globalLocations.length > 0) {
+       const validIds = new Set(filteredCycleEstablishments.map(ce => ce.establishment_id));
+       filtered = filtered.filter(r => validIds.has(r.establishment_id));
+    }
+    
+    if (globalSelectedUnits.length > 0) {
+      filtered = filtered.filter(r => globalSelectedUnits.includes(r.establishment_id));
+    }
+    return filtered;
+  }, [requests, globalSelectedUnits, globalLocations, filteredCycleEstablishments]);
+
   // Totais
-  const totalOrcado = useMemo(() => cycleEstablishments.reduce((acc, curr) => acc + Number(curr.total_orcado || 0), 0), [cycleEstablishments]);
-  const valorReservado = useMemo(() => requests.filter(r => r.status === 'SOLICITADA').reduce((acc, r) => acc + Number(r.valor || 0), 0), [requests]);
-  const valorAprovado = useMemo(() => requests.filter(r => r.status === 'APROVADA').reduce((acc, r) => acc + Number(r.valor || 0), 0), [requests]);
-  const folgasCompradasCount = useMemo(() => requests.filter(r => r.status === 'APROVADA').length, [requests]);
-  const pendentesCount = useMemo(() => requests.filter(r => r.status === 'SOLICITADA').length, [requests]);
+  const totalOrcado = useMemo(() => filteredCycleEstablishments.reduce((acc, curr) => acc + Number(curr.total_orcado || 0), 0), [filteredCycleEstablishments]);
+  const valorReservado = useMemo(() => filteredRequests.filter(r => r.status === 'SOLICITADA').reduce((acc, r) => acc + Number(r.valor || 0), 0), [filteredRequests]);
+  const valorAprovado = useMemo(() => filteredRequests.filter(r => r.status === 'APROVADA').reduce((acc, r) => acc + Number(r.valor || 0), 0), [filteredRequests]);
+  const folgasCompradasCount = useMemo(() => filteredRequests.filter(r => r.status === 'APROVADA').length, [filteredRequests]);
+  const pendentesCount = useMemo(() => filteredRequests.filter(r => r.status === 'SOLICITADA').length, [filteredRequests]);
 
   const saldoDisponivel = totalOrcado - (valorReservado + valorAprovado);
   const percentualConsumido = totalOrcado > 0 ? ((valorReservado + valorAprovado) / totalOrcado) * 100 : 0;
 
   // Gráfico de Pizza (Consumo por Cargo)
   const pieData = useMemo(() => {
-    const aprovedReqs = requests.filter(r => r.status === 'APROVADA');
+    const aprovedReqs = filteredRequests.filter(r => r.status === 'APROVADA');
     if (aprovedReqs.length === 0 || positions.length === 0) return [];
 
     const grouped = aprovedReqs.reduce((acc, req) => {
@@ -143,12 +219,12 @@ export const AdminDashboard: React.FC = () => {
         color: colors[idx % colors.length]
       };
     }).sort((a, b) => b.amount - a.amount);
-  }, [requests, positions]);
+  }, [filteredRequests, positions]);
 
   // Tabela e Ranking de Unidades
   const unidades = useMemo(() => {
-    return cycleEstablishments.map(ce => {
-      const uReqs = requests.filter(r => r.establishment_id === ce.establishment_id);
+    return filteredCycleEstablishments.map(ce => {
+      const uReqs = filteredRequests.filter(r => r.establishment_id === ce.establishment_id);
       
       const gasto = uReqs.filter(r => r.status === 'SOLICITADA' || r.status === 'APROVADA').reduce((acc, r) => acc + Number(r.valor), 0);
       const orc = Number(ce.total_orcado || 0);
@@ -181,11 +257,68 @@ export const AdminDashboard: React.FC = () => {
         color
       };
     });
-  }, [cycleEstablishments, requests]);
+  }, [filteredCycleEstablishments, filteredRequests]);
+
+  const filteredUnidades = useMemo(() => {
+    const normalizedSearch = searchUnit.trim().toLocaleLowerCase('pt-BR');
+
+    return unidades.filter((unidade) => {
+      const matchesSearch = !normalizedSearch || unidade.nome.toLocaleLowerCase('pt-BR').includes(normalizedSearch);
+      const matchesStatus = statusFilter === 'Todos' || unidade.status === statusFilter;
+      const matchesLocation = locationFilter === 'Todos' || unidade.loc === locationFilter;
+      return matchesSearch && matchesStatus && matchesLocation;
+    });
+  }, [locationFilter, searchUnit, statusFilter, unidades]);
 
   const rankingUnidades = useMemo(() => {
     return [...unidades].sort((a, b) => b.consumoPct - a.consumoPct).slice(0, 5);
   }, [unidades]);
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, tab: DashboardTab) => {
+    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+    event.preventDefault();
+    const nextTab = tab === 'dashboard' ? 'detalhamento' : 'dashboard';
+    setActiveTab(nextTab);
+    tabRefs.current[nextTab]?.focus();
+  };
+
+  const handleExport = () => {
+    if (filteredUnidades.length === 0) {
+      setActionMessage('Não há unidades para exportar com os filtros atuais.');
+      return;
+    }
+
+    const headers = ['Unidade Penal', 'Localização', 'Orçamento', '% Consumido', 'Valor Consumido', 'Saldo Disponível', 'Pendentes', 'Aprovadas', 'Rejeitadas', 'Valor Aprovado', 'Status'];
+    const escapeCsv = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+    const rows = filteredUnidades.map((unidade) => [
+      unidade.nome,
+      unidade.loc,
+      getFormatCurrency(unidade.orcamento),
+      `${unidade.consumoPct}%`,
+      getFormatCurrency(unidade.gasto),
+      getFormatCurrency(unidade.saldo),
+      unidade.pendentes,
+      unidade.aprovadas,
+      unidade.rejeitadas,
+      getFormatCurrency(unidade.valorAprov),
+      unidade.status,
+    ].map(escapeCsv).join(';'));
+
+    const csv = ['\uFEFF' + headers.map(escapeCsv).join(';'), ...rows].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `unidades-penais-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setActionMessage(`${filteredUnidades.length} unidade(s) exportada(s) com sucesso.`);
+  };
+
+  const handleUnitAction = (action: string, unitName: string) => {
+    setActionMessage(`${action} para ${unitName} ficará disponível no módulo de detalhes.`);
+  };
 
   // Alertas
   const alertas = useMemo(() => {
@@ -198,22 +331,22 @@ export const AdminDashboard: React.FC = () => {
     if (inactiveUnits > 0) {
       list.push({ type: 'warning', icon: <AlertCircle size={18} color="#ea580c" />, text: <><span style={{fontWeight:600}}>{inactiveUnits} unidades</span> ainda não realizaram solicitações.</> });
     }
-    const pendingRequests = requests.filter(r => r.status === 'SOLICITADA');
+    const pendingRequests = filteredRequests.filter(r => r.status === 'SOLICITADA');
     if (pendingRequests.length > 0) {
        // simplificação para o alerta: qualquer pendente conta.
       list.push({ type: 'info', icon: <Info size={18} color="#2563eb" />, text: <><span style={{fontWeight:600}}>{pendingRequests.length} solicitações</span> aguardam análise.</> });
     }
     return list;
-  }, [unidades, requests]);
+  }, [unidades, filteredRequests]);
 
   // Gráfico de Linha (Agrupamento por Data de solicitacao)
   const lineChartData = useMemo(() => {
-    if (requests.length === 0) return [];
+    if (filteredRequests.length === 0) return [];
     
     // Simplificando o agrupamento por dia
     const map = new Map<string, { Reservado: number, Aprovado: number, Pago: number }>();
     
-    const sorted = [...requests].sort((a, b) => new Date(a.requested_at).getTime() - new Date(b.requested_at).getTime());
+    const sorted = [...filteredRequests].sort((a, b) => new Date(a.requested_at).getTime() - new Date(b.requested_at).getTime());
     
     let accReservado = 0;
     let accAprovado = 0;
@@ -234,7 +367,7 @@ export const AdminDashboard: React.FC = () => {
     const data = Array.from(map.entries()).map(([date, vals]) => ({ date, ...vals }));
     // Se só tivermos 1 data, adiciona uma com 0 para o gráfico não ficar um ponto só, se quiser.
     return data;
-  }, [requests]);
+  }, [filteredRequests]);
 
 
   const getStatusBadge = (status: string) => {
@@ -247,24 +380,168 @@ export const AdminDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-        <div style={{ display: 'inline-block', width: '24px', height: '24px', border: '3px solid var(--color-divider)', borderTopColor: 'var(--color-primary)', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-        <div style={{ marginTop: 'var(--space-4)' }}>Carregando dados da Sede...</div>
+      <div className="dashboard-state" role="status" aria-live="polite">
+        <div className="dashboard-spinner" aria-hidden="true"></div>
+        <div>Carregando dados da Sede...</div>
+      </div>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <div className="dashboard-state dashboard-state--error" role="alert">
+        <AlertCircle size={28} aria-hidden="true" />
+        <strong>Não foi possível carregar o dashboard</strong>
+        <p>{errorMessage}</p>
+        <button className="btn btn-secondary" type="button" onClick={fetchData}>
+          Tentar novamente
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="modern-dashboard" style={{ fontFamily: 'Inter, sans-serif' }}>
+    <div className="modern-dashboard">
       
       {/* CABEÇALHO */}
-      <div className="modern-header" style={{ marginBottom: 'var(--space-6)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ fontSize: '28px', margin: '0 0 var(--space-2) 0', color: 'var(--color-text)', fontWeight: 700, fontFamily: 'Inter, sans-serif' }}>Dashboard da Administração</h1>
-          <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '15px' }}>Visão consolidada de todas as unidades penais do Estado.</p>
+      <div className="modern-header" style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: '300px' }}>
+          <h1 className="dashboard-title">Dashboard da Administração</h1>
+          <p className="dashboard-description">Visão consolidada de todas as unidades penais do Estado.</p>
+          
+          <div style={{ display: 'flex', gap: '16px', marginTop: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }} ref={dropdownRef}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', textTransform: 'uppercase' }}>Estabelecimento Penal</label>
+              <input
+                 type="text"
+                 className="input"
+                 style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--color-divider)', fontSize: '13px', background: '#fff', minWidth: '300px' }}
+                 placeholder={globalSelectedUnits.length === 0 ? "Buscar Estabelecimento Penal..." : `${globalSelectedUnits.length} unidade(s) selecionada(s)`}
+                 value={globalSearchTerm}
+                 onClick={() => setIsDropdownOpen(true)}
+                 onChange={e => {
+                   setGlobalSearchTerm(e.target.value);
+                   setIsDropdownOpen(true);
+                 }}
+              />
+              
+
+              {isDropdownOpen && (() => {
+                 const visibleEsts = allEstablishments
+                    .filter(est => globalLocations.length === 0 || globalLocations.includes(est.localizacao))
+                    .filter(est => est.nome.toLowerCase().includes(globalSearchTerm.toLowerCase()));
+                 const visibleIds = visibleEsts.map(e => e.id);
+                 const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => globalSelectedUnits.includes(id));
+
+                 return (
+                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid var(--color-divider)', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', maxHeight: '250px', overflowY: 'auto', zIndex: 50 }}>
+                      <div 
+                         style={{ padding: '8px 16px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid var(--color-divider)', color: '#1e293b', background: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
+                         onClick={(e) => {
+                            e.stopPropagation();
+                            if (allVisibleSelected) {
+                               setGlobalSelectedUnits(prev => prev.filter(id => !visibleIds.includes(id)));
+                            } else {
+                               setGlobalSelectedUnits(prev => {
+                                  const next = [...prev];
+                                  for (const id of visibleIds) {
+                                     if (!next.includes(id)) next.push(id);
+                                  }
+                                  return next;
+                               });
+                            }
+                         }}
+                      >
+                         <input type="checkbox" checked={allVisibleSelected} readOnly style={{ cursor: 'pointer' }} />
+                         Selecionar Todas
+                      </div>
+                      
+                      {visibleEsts.map(est => {
+                         const isSelected = globalSelectedUnits.includes(est.id);
+                         return (
+                            <div 
+                               key={est.id} 
+                               style={{ padding: '8px 16px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid var(--color-divider)', color: isSelected ? '#2563eb' : '#1e293b', background: isSelected ? '#eff6ff' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px' }}
+                               onClick={(e) => {
+                                  e.stopPropagation();
+                                  setGlobalSelectedUnits(prev => prev.includes(est.id) ? prev.filter(id => id !== est.id) : [...prev, est.id]);
+                               }}
+                               onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f8fafc' }}
+                               onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
+                            >
+                               <input type="checkbox" checked={isSelected} readOnly style={{ cursor: 'pointer' }} />
+                               {est.nome}
+                            </div>
+                         )
+                      })}
+                      {visibleEsts.length === 0 && (
+                         <div style={{ padding: '8px 16px', fontSize: '13px', color: '#64748b' }}>Nenhum estabelecimento encontrado.</div>
+                      )}
+                   </div>
+                 );
+              })()}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }} ref={locationDropdownRef}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', textTransform: 'uppercase' }}>Localização</label>
+              
+              <div
+                 className="input"
+                 style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--color-divider)', fontSize: '13px', background: '#fff', minWidth: '220px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                 onClick={() => setIsLocationDropdownOpen(true)}
+              >
+                 <span style={{ color: globalLocations.length === 0 ? '#94a3b8' : '#1e293b' }}>
+                    {globalLocations.length === 0 ? "Todas as Regiões..." : `${globalLocations.length} região(ões) selecionada(s)`}
+                 </span>
+                 <span style={{ fontSize: '10px', color: '#94a3b8' }}>▼</span>
+              </div>
+
+              {isLocationDropdownOpen && (() => {
+                 const allVisibleSelected = availableLocations.length > 0 && availableLocations.every(loc => globalLocations.includes(loc));
+
+                 return (
+                   <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid var(--color-divider)', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', maxHeight: '250px', overflowY: 'auto', zIndex: 50 }}>
+                      <div 
+                         style={{ padding: '8px 16px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid var(--color-divider)', color: '#1e293b', background: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600 }}
+                         onClick={(e) => {
+                            e.stopPropagation();
+                            if (allVisibleSelected) {
+                               setGlobalLocations([]);
+                            } else {
+                               setGlobalLocations([...availableLocations]);
+                            }
+                         }}
+                      >
+                         <input type="checkbox" checked={allVisibleSelected} readOnly style={{ cursor: 'pointer' }} />
+                         Selecionar Todas
+                      </div>
+
+                      {availableLocations.map(loc => {
+                          const isSelected = globalLocations.includes(loc);
+                          return (
+                            <div 
+                              key={loc} 
+                              style={{ padding: '8px 16px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid var(--color-divider)', color: isSelected ? '#2563eb' : '#1e293b', background: isSelected ? '#eff6ff' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setGlobalLocations(prev => prev.includes(loc) ? prev.filter(l => l !== loc) : [...prev, loc]);
+                              }}
+                              onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = '#f8fafc' }}
+                              onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
+                            >
+                              <input type="checkbox" checked={isSelected} readOnly style={{ cursor: 'pointer' }} />
+                              {loc}
+                            </div>
+                          )
+                      })}
+                   </div>
+                 );
+              })()}
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <div className="dashboard-header-actions">
           
           <div style={{ padding: '10px 16px', border: '1px solid var(--color-divider)', borderRadius: '8px', background: '#fff', fontSize: '14px', fontWeight: 600, display: 'flex', gap: '8px', alignItems: 'center' }}>
             <Calendar size={18} color="var(--color-text-muted)" />
@@ -281,35 +558,64 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
-          <div style={{ position: 'relative', cursor: 'pointer', background: '#fff', border: '1px solid var(--color-divider)', padding: '12px', borderRadius: '8px' }}>
-            <Bell size={20} color="var(--color-text)" />
+          <button
+            type="button"
+            className="dashboard-notification-button"
+            onClick={() => setActionMessage(pendentesCount > 0 ? `${pendentesCount} solicitação(ões) aguardam análise.` : 'Não há novas solicitações pendentes.')}
+            aria-label={`Notificações${pendentesCount > 0 ? `: ${pendentesCount} pendentes` : ''}`}
+          >
+            <Bell size={20} aria-hidden="true" />
             {pendentesCount > 0 && (
-              <span style={{ position: 'absolute', top: '-6px', right: '-6px', background: '#ef4444', color: '#fff', fontSize: '11px', fontWeight: 'bold', padding: '2px 6px', borderRadius: '12px' }}>{pendentesCount}</span>
+              <span className="dashboard-notification-badge" aria-hidden="true">{pendentesCount}</span>
             )}
-          </div>
+          </button>
         </div>
       </div>
 
       {/* ABAS (TABS) SUPERIORES */}
-      <div style={{ display: 'flex', gap: '32px', borderBottom: '1px solid var(--color-divider)', marginBottom: 'var(--space-6)' }}>
-        <div 
-          onClick={() => setActiveTab('dashboard')} 
-          style={{ paddingBottom: '12px', cursor: 'pointer', fontSize: '15px', fontWeight: activeTab === 'dashboard' ? 600 : 500, color: activeTab === 'dashboard' ? '#2563eb' : 'var(--color-text-muted)', borderBottom: activeTab === 'dashboard' ? '2px solid #2563eb' : '2px solid transparent', transition: 'all 0.2s' }}
+      <div className="dashboard-tabs" role="tablist" aria-label="Seções do dashboard">
+        <button
+          ref={(element) => { tabRefs.current.dashboard = element; }}
+          id="dashboard-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'dashboard'}
+          aria-controls="dashboard-panel"
+          tabIndex={activeTab === 'dashboard' ? 0 : -1}
+          className={`dashboard-tab${activeTab === 'dashboard' ? ' dashboard-tab--active' : ''}`}
+          onClick={() => setActiveTab('dashboard')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'dashboard')}
         >
           Visão Geral
-        </div>
-        <div 
-          onClick={() => setActiveTab('detalhamento')} 
-          style={{ paddingBottom: '12px', cursor: 'pointer', fontSize: '15px', fontWeight: activeTab === 'detalhamento' ? 600 : 500, color: activeTab === 'detalhamento' ? '#2563eb' : 'var(--color-text-muted)', borderBottom: activeTab === 'detalhamento' ? '2px solid #2563eb' : '2px solid transparent', transition: 'all 0.2s' }}
+        </button>
+        <button
+          ref={(element) => { tabRefs.current.detalhamento = element; }}
+          id="detalhamento-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'detalhamento'}
+          aria-controls="detalhamento-panel"
+          tabIndex={activeTab === 'detalhamento' ? 0 : -1}
+          className={`dashboard-tab${activeTab === 'detalhamento' ? ' dashboard-tab--active' : ''}`}
+          onClick={() => setActiveTab('detalhamento')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'detalhamento')}
         >
           Detalhamento
-        </div>
+        </button>
       </div>
+      {actionMessage && (
+        <div className="dashboard-feedback" role="status" aria-live="polite">
+          {actionMessage}
+          <button type="button" className="dashboard-feedback__close" onClick={() => setActionMessage(null)} aria-label="Fechar mensagem">
+            ×
+          </button>
+        </div>
+      )}
 
       {activeTab === 'dashboard' && (
-        <>
+        <div id="dashboard-panel" role="tabpanel" aria-labelledby="dashboard-tab" tabIndex={0}>
           {/* LINHA 1: CARDS */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
+          <div className="dashboard-metrics-grid" style={{ display: 'grid', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
         
         {/* Card 1 */}
         <div className="modern-card" style={{ gap: '16px' }}>
@@ -326,7 +632,15 @@ export const AdminDashboard: React.FC = () => {
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 600, color: '#111827', marginBottom: '6px' }}>
               <span>{percentualConsumido.toFixed(0)}% consumido</span>
             </div>
-            <div style={{ width: '100%', height: '6px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}>
+            <div
+              className="dashboard-progress"
+              role="progressbar"
+              aria-label="Percentual do orçamento consumido"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(Math.max(percentualConsumido, 0), 100)}
+              style={{ width: '100%', height: '6px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden' }}
+            >
               <div style={{ width: `${Math.min(percentualConsumido, 100)}%`, height: '100%', background: '#16a34a', borderRadius: '4px' }}></div>
             </div>
           </div>
@@ -415,7 +729,15 @@ export const AdminDashboard: React.FC = () => {
             Encerramento em <span style={{ fontWeight: 600, color: '#111827' }}>{activeCycle ? formatDateString(activeCycle.data_fim) : '-'}</span>
           </div>
           <div style={{ marginTop: 'auto' }}>
-            <div style={{ width: '100%', height: '6px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden', marginBottom: '6px' }}>
+            <div
+              className="dashboard-progress"
+              role="progressbar"
+              aria-label="Progresso do ciclo atual"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(Math.max(progressoCiclo, 0), 100)}
+              style={{ width: '100%', height: '6px', background: '#f3f4f6', borderRadius: '4px', overflow: 'hidden', marginBottom: '6px' }}
+            >
               <div style={{ width: `${Math.min(progressoCiclo, 100)}%`, height: '100%', background: '#ea580c', borderRadius: '4px' }}></div>
             </div>
             <div style={{ fontSize: '12px', fontWeight: 600, color: '#111827' }}>{progressoCiclo}% do ciclo concluído</div>
@@ -425,7 +747,7 @@ export const AdminDashboard: React.FC = () => {
       </div>
 
       {/* LINHA 2: GRÁFICOS E FLUXO */}
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
+      <div className="dashboard-charts-grid" style={{ display: 'grid', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
         
         {/* Painel 1: Gráfico de Linha */}
         <div className="modern-card">
@@ -440,7 +762,7 @@ export const AdminDashboard: React.FC = () => {
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                   <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} dy={10} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} tickFormatter={(value) => `${value / 1000}k`} />
-                  <RechartsTooltip formatter={(value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value)} />
+                  <RechartsTooltip formatter={(value) => value == null ? '-' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value))} />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: '13px', paddingTop: '10px' }} />
                   <Line type="monotone" dataKey="Reservado" stroke="#ea580c" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
                   <Line type="monotone" dataKey="Aprovado" stroke="#16a34a" strokeWidth={3} dot={false} />
@@ -479,7 +801,7 @@ export const AdminDashboard: React.FC = () => {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
-                      <RechartsTooltip formatter={(value: number) => `${value}%`} />
+                      <RechartsTooltip formatter={(value) => value == null ? '-' : `${value}%`} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -561,13 +883,13 @@ export const AdminDashboard: React.FC = () => {
       </div>
 
       {/* LINHA 3: TABELAS MENORES E ALERTAS */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
+      <div className="dashboard-support-grid" style={{ display: 'grid', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
         
         {/* Painel 1: Ranking */}
         <div className="modern-card">
           <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-neutral-600)' }}>Ranking das Unidades</h3>
-            <span style={{ fontSize: '12px', color: '#2563eb', fontWeight: 600, cursor: 'pointer' }}>Ver completo &rarr;</span>
+            <button type="button" className="dashboard-inline-action" onClick={() => setActiveTab('detalhamento')}>Ver completo &rarr;</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {rankingUnidades.length > 0 ? rankingUnidades.map((unidade, idx) => (
@@ -622,7 +944,7 @@ export const AdminDashboard: React.FC = () => {
         <div className="modern-card">
           <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-neutral-600)' }}>Alertas Importantes</h3>
-            <span style={{ fontSize: '12px', color: '#2563eb', fontWeight: 600, cursor: 'pointer' }}>Ver todos &rarr;</span>
+            <button type="button" className="dashboard-inline-action" onClick={() => setActionMessage(alertas.length > 0 ? `${alertas.length} alerta(s) em destaque no painel.` : 'Nenhum alerta ativo no momento.')}>Ver todos &rarr;</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {alertas.length > 0 ? alertas.map((alert, idx) => (
@@ -637,33 +959,52 @@ export const AdminDashboard: React.FC = () => {
         </div>
 
       </div>
-      </>
+      </div>
       )}
 
       {/* LINHA 4: TABELA GERAL (AGORA NA ABA DETALHAMENTO) */}
       {activeTab === 'detalhamento' && (
-      <div className="modern-card" style={{ padding: '0', overflow: 'hidden' }}>
+      <div id="detalhamento-panel" role="tabpanel" aria-labelledby="detalhamento-tab" tabIndex={0} className="modern-card" style={{ padding: '0', overflow: 'hidden' }}>
         
         {/* Toolbar da Tabela */}
-        <div style={{ padding: '20px', borderBottom: '1px solid var(--color-divider)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div className="dashboard-table-toolbar" style={{ padding: '20px', borderBottom: '1px solid var(--color-divider)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, textTransform: 'uppercase' }}>Unidades Penais - Visão Geral</h3>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, textTransform: 'uppercase' }}>Estabelecimentos Penais - Visão Geral</h3>
+            <p className="dashboard-table-count">{filteredUnidades.length} de {unidades.length} unidades</p>
           </div>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <input type="text" placeholder="Pesquisar unidade..." className="input" style={{ width: '220px', fontSize: '13px' }} />
-            <select className="input" style={{ width: '140px', fontSize: '13px' }}>
-              <option>Status (Todos)</option>
-              <option>Normal</option>
-              <option>Atenção</option>
-              <option>Crítico</option>
+          <div className="dashboard-table-filters">
+            <input
+              type="search"
+              placeholder="Pesquisar unidade..."
+              aria-label="Pesquisar unidade"
+              className="input dashboard-search-input"
+              value={searchUnit}
+              onChange={(event) => setSearchUnit(event.target.value)}
+            />
+            <select
+              className="input dashboard-filter-select"
+              aria-label="Filtrar por status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as UnitStatusFilter)}
+            >
+              <option value="Todos">Status (Todos)</option>
+              <option value="Normal">Normal</option>
+              <option value="Atenção">Atenção</option>
+              <option value="Crítico">Crítico</option>
             </select>
-            <select className="input" style={{ width: '150px', fontSize: '13px' }}>
-              <option>Local (Todos)</option>
-              <option>Capital</option>
-              <option>Interior</option>
+            <select
+              className="input dashboard-filter-select"
+              aria-label="Filtrar por localização"
+              value={locationFilter}
+              onChange={(event) => setLocationFilter(event.target.value)}
+            >
+              <option value="Todos">Local (Todos)</option>
+              {availableLocations.map(loc => (
+                <option key={loc} value={loc}>{loc}</option>
+              ))}
             </select>
-            <button className="btn btn-secondary" style={{ fontSize: '13px' }}>
-              <Download size={16} /> Exportar
+            <button className="btn btn-secondary" type="button" onClick={handleExport} style={{ fontSize: '13px' }}>
+              <Download size={16} aria-hidden="true" /> Exportar
             </button>
           </div>
         </div>
@@ -673,7 +1014,7 @@ export const AdminDashboard: React.FC = () => {
           <table className="modern-table" style={{ whiteSpace: 'nowrap', width: '100%', minWidth: '1200px' }}>
             <thead>
               <tr>
-                <th style={{ padding: '12px 16px' }}>Unidade Penal</th>
+                <th style={{ padding: '12px 16px' }}>Estabelecimento Penal</th>
                 <th style={{ padding: '12px 16px' }}>Localização</th>
                 <th style={{ textAlign: 'right', padding: '12px 16px' }}>Orçamento</th>
                 <th style={{ textAlign: 'center', padding: '12px 16px' }}>% Consumido</th>
@@ -688,7 +1029,7 @@ export const AdminDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {unidades.map(u => (
+              {filteredUnidades.map(u => (
                 <tr key={u.id}>
                   <td style={{ fontWeight: 600, padding: '12px 16px' }}>{u.nome}</td>
                   <td style={{ padding: '12px 16px' }}>{u.loc}</td>
@@ -715,15 +1056,17 @@ export const AdminDashboard: React.FC = () => {
                   <td style={{ padding: '12px 16px' }}>{getStatusBadge(u.status)}</td>
                   <td style={{ textAlign: 'center', padding: '12px 16px' }}>
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                      <button className="btn-ghost" title="Visualizar Detalhes" style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><Eye size={16} /></button>
-                      <button className="btn-ghost" title="Relatório" style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><FileSpreadsheet size={16} /></button>
+                      <button className="btn-ghost" type="button" title="Visualizar Detalhes" aria-label={`Visualizar detalhes de ${u.nome}`} onClick={() => handleUnitAction('Visualização de detalhes', u.nome)} style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><Eye size={16} aria-hidden="true" /></button>
+                      <button className="btn-ghost" type="button" title="Relatório" aria-label={`Gerar relatório de ${u.nome}`} onClick={() => handleUnitAction('Relatório', u.nome)} style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><FileSpreadsheet size={16} aria-hidden="true" /></button>
                     </div>
                   </td>
                 </tr>
               ))}
-              {unidades.length === 0 && (
+              {filteredUnidades.length === 0 && (
                 <tr>
-                  <td colSpan={12} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>Nenhuma unidade encontrada.</td>
+                  <td colSpan={12} style={{ textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                    {unidades.length === 0 ? 'Nenhuma unidade encontrada.' : 'Nenhuma unidade corresponde aos filtros atuais.'}
+                  </td>
                 </tr>
               )}
             </tbody>

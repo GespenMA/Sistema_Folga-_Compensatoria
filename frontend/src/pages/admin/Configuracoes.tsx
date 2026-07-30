@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
+import * as XLSX from 'xlsx';
 
 type Position = {
   id: string;
@@ -18,7 +19,7 @@ type ProfileUser = {
 };
 
 export const Configuracoes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'cargos'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'cargos' | 'importacao'>('usuarios');
   
   // Estados para Usuários
   const [usuarios, setUsuarios] = useState<ProfileUser[]>([]);
@@ -45,13 +46,55 @@ export const Configuracoes: React.FC = () => {
   const [cargoValor, setCargoValor] = useState('');
   const [isSubmittingCargo, setIsSubmittingCargo] = useState(false);
 
+  // =============================================
+  // Estados para Importação Mensal
+  // =============================================
+  type PreviewRow = { matricula: string; nome: string; cargo: string; estabelecimento: string; trabalhadas: string; minutosNovos: number; plantoes: number; minutosResiduo: number; erros: string[] };
+  type ImportResult = { importados: number; atualizados: number; shiftsInseridos: number; erros: string[] };
+
+  const [activeCycleForImport, setActiveCycleForImport] = useState<{ id: string; nome: string; data_inicio: string; data_fim: string } | null>(null);
+  const [loadingImportCycle, setLoadingImportCycle] = useState(false);
+  const [importPreview, setImportPreview] = useState<PreviewRow[]>([]);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importStep, setImportStep] = useState<'idle' | 'preview' | 'importing' | 'done'>('idle');
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (activeTab === 'usuarios') {
       fetchUsuarios();
       fetchEstabelecimentos();
+    } else if (activeTab === 'cargos') {
+      fetchCargos();
+    } else if (activeTab === 'importacao') {
+      fetchActiveCycleForImport();
     }
-    else fetchCargos();
   }, [activeTab]);
+
+  const fetchActiveCycleForImport = async () => {
+    setLoadingImportCycle(true);
+    try {
+      const { data } = await supabase
+        .from('cycles')
+        .select('id, nome, data_inicio, data_fim')
+        .in('status', ['ABERTO', 'REABERTO'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setActiveCycleForImport(data || null);
+    } finally {
+      setLoadingImportCycle(false);
+    }
+  };
+
+  // Converte "HH:MM" para minutos totais
+  const parseHorasMinutos = (str: string): number => {
+    if (!str) return 0;
+    const parts = String(str).trim().split(':');
+    if (parts.length < 2) return 0;
+    return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  };
 
   const fetchEstabelecimentos = async () => {
     const { data } = await supabase.from('establishments').select('id, nome').order('nome');
@@ -259,6 +302,204 @@ export const Configuracoes: React.FC = () => {
     }
   };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFile(file);
+    setImportStep('idle');
+    setImportResult(null);
+
+    // Ler o arquivo e gerar preview (saldo_minutos do banco será somado na confirmação)
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const data = new Uint8Array(ev.target?.result as ArrayBuffer);
+      const wb = XLSX.read(data, { type: 'array' });
+      const ws = wb.Sheets['Base_Geral'];
+      if (!ws) { alert('Aba "Base_Geral" não encontrada no arquivo.'); return; }
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      // rows[0] é o cabeçalho
+      const MINUTOS_POR_PLANTAO = 720; // 12h
+      const preview: PreviewRow[] = rows.slice(1).filter(r => r[0]).map(r => {
+        const trabalhadas = String(r[4] || '0:00');
+        const minutosNovos = parseHorasMinutos(trabalhadas);
+        // O preview mostra o cálculo só das horas novas (sem saldo anterior)
+        // O saldo anterior é buscado individualmente na confirmação
+        const plantoes = Math.floor(minutosNovos / MINUTOS_POR_PLANTAO);
+        const minutosResiduo = minutosNovos % MINUTOS_POR_PLANTAO;
+        const erros: string[] = [];
+        if (!r[0]) erros.push('Matrícula vazia');
+        if (!r[1]) erros.push('Nome vazio');
+        if (!r[2]) erros.push('Cargo vazio');
+        if (!r[3]) erros.push('Estabelecimento vazio');
+        return {
+          matricula: String(r[0] || ''),
+          nome: String(r[1] || ''),
+          cargo: String(r[2] || ''),
+          estabelecimento: String(r[3] || ''),
+          trabalhadas,
+          minutosNovos,
+          plantoes,
+          minutosResiduo,
+          erros
+        };
+      });
+      setImportPreview(preview);
+      setImportStep('preview');
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleConfirmImport = async (forceOverwrite = false) => {
+    if (!activeCycleForImport || importPreview.length === 0) return;
+
+    // Normaliza strings: remove acentos, converte para minúsculo
+    const normalizeStr = (s: string) =>
+      s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // -----------------------------------------------------------------------
+    // 1. VERIFICAR SE JA EXISTEM LANÇAMENTOS NESTE CICLO (antes de iniciar)
+    // -----------------------------------------------------------------------
+    if (!forceOverwrite) {
+      const { count } = await supabase
+        .from('shifts')
+        .select('id', { count: 'exact', head: true })
+        .eq('cycle_id', activeCycleForImport.id);
+
+      if (count && count > 0) {
+        const confirmMsg =
+          `⚠️ ATENÇÃO: Já existem ${count} lançamentos de plantões para o ciclo "${activeCycleForImport.nome}".\n\n` +
+          `Ao confirmar, os dados atuais serão SUBSTITUÍDOS pelos da nova planilha.\n\n` +
+          `Tem certeza que deseja sobrescrever?`;
+
+        if (!window.confirm(confirmMsg)) return;
+        // Chama novamente com flag de sobrescrita confirmada
+        return handleConfirmImport(true);
+      }
+    }
+
+    setImportStep('importing');
+    setImportProgress({ current: 0, total: importPreview.length, currentName: '' });
+
+    try {
+      const { data: ests } = await supabase.from('establishments').select('id, nome');
+      const { data: positions } = await supabase.from('positions').select('id, nome, codigo');
+
+      const estMap = new Map<string, string>();
+      ests?.forEach(e => estMap.set(normalizeStr(e.nome), e.id));
+
+      const posMap = new Map<string, string>();
+      positions?.forEach(p => posMap.set(normalizeStr(p.nome), p.id));
+
+      const MINUTOS_POR_PLANTAO = 720;
+      let importados = 0, atualizados = 0, shiftsInseridos = 0;
+      const erros: string[] = [];
+
+      for (let i = 0; i < importPreview.length; i++) {
+        const row = importPreview[i];
+        setImportProgress({ current: i + 1, total: importPreview.length, currentName: row.nome });
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        if (row.erros.length > 0) {
+          erros.push(`Linha ignorada (${row.matricula} - ${row.nome}): ${row.erros.join(', ')}`);
+          continue;
+        }
+
+        const estId = estMap.get(normalizeStr(row.estabelecimento));
+        const posId = posMap.get(normalizeStr(row.cargo));
+
+        if (!estId) { erros.push(`Estabelecimento não encontrado: "${row.estabelecimento}" (${row.nome})`); continue; }
+        if (!posId) { erros.push(`Cargo não encontrado: "${row.cargo}" (${row.nome})`); continue; }
+
+        // Buscar servidor existente com saldo de minutos atual
+        const { data: existingEmp } = await supabase
+          .from('employees')
+          .select('id, saldo_minutos')
+          .eq('establishment_id', estId)
+          .eq('matricula', row.matricula)
+          .maybeSingle();
+
+        let saldoMinutosBase = existingEmp?.saldo_minutos ?? 0;
+
+        // -----------------------------------------------------------------------
+        // 2. SE É SOBRESCRITA: reverter o saldo_minutos do ciclo anterior
+        // -----------------------------------------------------------------------
+        if (forceOverwrite && existingEmp) {
+          // Buscar o shift anterior deste servidor neste ciclo (se existir)
+          const { data: oldShift } = await supabase
+            .from('shifts')
+            .select('id, minutos_residuais')
+            .eq('employee_id', existingEmp.id)
+            .eq('cycle_id', activeCycleForImport.id)
+            .maybeSingle();
+
+          if (oldShift) {
+            // Reverter: saldo antes deste ciclo = saldo_atual - minutos_residuais_deste_ciclo
+            saldoMinutosBase = Math.max(0, saldoMinutosBase - (oldShift.minutos_residuais ?? 0));
+            // Deletar o shift antigo (trigger do banco recalcula saldo_plantoes)
+            await supabase.from('shifts').delete().eq('id', oldShift.id);
+          }
+        }
+
+        // Calcular plantões com saldo base correto
+        const totalMinutos = row.minutosNovos + saldoMinutosBase;
+        const plantoesTotal = Math.floor(totalMinutos / MINUTOS_POR_PLANTAO);
+        const novoSaldoMinutos = totalMinutos % MINUTOS_POR_PLANTAO;
+
+        // Upsert do servidor com novo saldo_minutos
+        const { data: empData, error: empError } = await supabase
+          .from('employees')
+          .upsert(
+            {
+              establishment_id: estId,
+              matricula: row.matricula,
+              nome: row.nome,
+              position_id: posId,
+              ativo: true,
+              data_admissao: activeCycleForImport.data_inicio,
+              saldo_minutos: novoSaldoMinutos
+            },
+            { onConflict: 'establishment_id,matricula', ignoreDuplicates: false }
+          )
+          .select('id')
+          .single();
+
+        const empId = empData?.id ?? existingEmp?.id;
+        if (!empId) { erros.push(`Erro ao salvar servidor ${row.nome}: ${empError?.message}`); continue; }
+
+        if (!existingEmp) importados++;
+        else atualizados++;
+
+        // Inserir shift com minutos_residuais registrado (para futura reversão)
+        if (plantoesTotal > 0) {
+          const { error: shiftErr } = await supabase.from('shifts').insert({
+            employee_id: empId,
+            cycle_id: activeCycleForImport.id,
+            periodo_inicio: activeCycleForImport.data_inicio,
+            periodo_fim: activeCycleForImport.data_fim,
+            quantidade_plantoes: plantoesTotal,
+            minutos_residuais: novoSaldoMinutos,
+          });
+          if (!shiftErr) shiftsInseridos++;
+          else erros.push(`Erro ao inserir plantões de ${row.nome}: ${shiftErr.message}`);
+        }
+      }
+
+      setImportResult({ importados, atualizados, shiftsInseridos, erros });
+      setImportStep('done');
+    } catch (err: any) {
+      alert('Erro durante a importação: ' + (err.message || err));
+      setImportStep('preview');
+    }
+  };
+
+  const handleResetImport = () => {
+    setImportStep('idle');
+    setImportFile(null);
+    setImportPreview([]);
+    setImportResult(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <div>
       <div style={{ marginBottom: 'var(--space-6)' }}>
@@ -276,6 +517,10 @@ export const Configuracoes: React.FC = () => {
         <label className="seg-opt" style={{ padding: 'var(--space-2) var(--space-4)' }}>
           <input type="radio" name="config-tab" checked={activeTab === 'cargos'} onChange={() => setActiveTab('cargos')} />
           Cargos e Valores
+        </label>
+        <label className="seg-opt" style={{ padding: 'var(--space-2) var(--space-4)' }}>
+          <input type="radio" name="config-tab" checked={activeTab === 'importacao'} onChange={() => setActiveTab('importacao')} />
+          📥 Importação Mensal
         </label>
       </div>
 
@@ -369,6 +614,180 @@ export const Configuracoes: React.FC = () => {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {activeTab === 'importacao' && (
+        <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
+          <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+
+          <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-divider)' }}>
+            <div style={{ fontWeight: 700, fontSize: '15px' }}>Importação Mensal de Servidores</div>
+            <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+              Carregue a planilha <strong>Base_Geral</strong> para importar os servidores e calcular os plantões do ciclo ativo.
+            </div>
+          </div>
+
+          <div style={{ padding: 'var(--space-5)' }}>
+
+            {/* Ciclo ativo */}
+            {loadingImportCycle ? (
+              <div style={{ padding: '16px', textAlign: 'center' }}>Verificando ciclo ativo...</div>
+            ) : !activeCycleForImport ? (
+              <div style={{ padding: '20px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#dc2626', fontWeight: 600 }}>
+                ⚠️ Nenhum ciclo ABERTO encontrado. Abra um ciclo antes de importar.
+              </div>
+            ) : (
+              <>
+                {/* Banner do ciclo */}
+                <div style={{ padding: '12px 16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '20px' }}>📅</span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#15803d' }}>Ciclo Ativo: {activeCycleForImport.nome}</div>
+                    <div style={{ fontSize: '12px', color: '#166534' }}>
+                      {new Date(activeCycleForImport.data_inicio + 'T00:00:00').toLocaleDateString('pt-BR')} a{' '}
+                      {new Date(activeCycleForImport.data_fim + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Etapa 1: Upload */}
+                {importStep === 'idle' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--color-text)' }}>
+                      <strong>Guía esperada:</strong> <code>Base_Geral</code> &nbsp;| 
+                      <strong>Colunas:</strong> Matrícula, Funcionário, Cargo, Estabelecimento penal, Trabalhadas
+                    </div>
+                    <div>
+                      <label className="btn btn-primary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                        📂 Selecionar Planilha (.xlsx)
+                        <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileChange} />
+                      </label>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                      ℹ️ A importação é segura: servidores já existentes serão atualizados (sem duplicação). Os plantões serão inseridos e o banco calculará automaticamente as folgas a cada 21 plantões acumulados.
+                    </div>
+                  </div>
+                )}
+
+                {/* Etapa 2: Preview */}
+                {importStep === 'preview' && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '15px' }}>Preview — {importPreview.length} registros encontrados</div>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Arquivo: {importFile?.name}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button className="btn btn-ghost" onClick={handleResetImport}>Cancelar</button>
+                        <button className="btn btn-primary blueprint" onClick={handleConfirmImport}>
+                          <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+                          ✅ Confirmar Importação
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: '360px', overflowY: 'auto', border: '1px solid var(--color-divider)', borderRadius: '8px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                          <tr>
+                            {['Matrícula','Nome','Cargo','Estabelecimento','Trabalhadas','Plantões','Saldo Residual'].map(h => (
+                              <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-divider)' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.map((row, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid var(--color-divider)', background: row.erros.length > 0 ? '#fef2f2' : 'transparent' }}>
+                              <td style={{ padding: '7px 12px' }}>{row.matricula}</td>
+                              <td style={{ padding: '7px 12px' }}>{row.nome}</td>
+                              <td style={{ padding: '7px 12px', fontSize: '11px' }}>{row.cargo}</td>
+                              <td style={{ padding: '7px 12px', fontSize: '11px' }}>{row.estabelecimento}</td>
+                              <td style={{ padding: '7px 12px', textAlign: 'center' }}>{row.trabalhadas}</td>
+                              <td style={{ padding: '7px 12px', textAlign: 'center', fontWeight: 700 }}>
+                                {row.erros.length > 0 ? <span style={{ color: '#dc2626' }}>⚠️ {row.erros[0]}</span> : row.plantoes}
+                              </td>
+                              <td style={{ padding: '7px 12px', textAlign: 'center', color: '#92400e', fontWeight: 600, fontSize: '11px' }}>
+                                {row.erros.length > 0 ? '' : `${Math.floor(row.minutosResiduo / 60)}h${String(row.minutosResiduo % 60).padStart(2,'0')}min`}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Etapa 3: Importando com barra de progresso */}
+                {importStep === 'importing' && (() => {
+                  const pct = importProgress.total > 0 ? Math.round((importProgress.current / importProgress.total) * 100) : 0;
+                  return (
+                    <div style={{ padding: '32px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--color-text)' }}>
+                          ⏳ Importando servidores...
+                        </div>
+                        <div style={{ fontWeight: 800, fontSize: '18px', color: '#2563eb' }}>{pct}%</div>
+                      </div>
+
+                      {/* Barra de progresso */}
+                      <div style={{ width: '100%', height: '14px', background: '#e2e8f0', borderRadius: '99px', overflow: 'hidden', marginBottom: '12px' }}>
+                        <div style={{
+                          height: '100%',
+                          width: `${pct}%`,
+                          background: 'linear-gradient(90deg, #2563eb, #7c3aed)',
+                          borderRadius: '99px',
+                          transition: 'width 0.1s ease'
+                        }} />
+                      </div>
+
+                      {/* Contagem e nome atual */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                        <div>
+                          Processando: <strong style={{ color: 'var(--color-text)', maxWidth: '400px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
+                            {importProgress.currentName || '...'}
+                          </strong>
+                        </div>
+                        <div>{importProgress.current} / {importProgress.total} registros</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Etapa 4: Resultado */}
+                {importStep === 'done' && importResult && (
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '20px' }}>✅ Importação Concluída!</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                      <div style={{ padding: '16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '28px', fontWeight: 800, color: '#16a34a' }}>{importResult.importados}</div>
+                        <div style={{ fontSize: '12px', color: '#15803d', marginTop: '4px' }}>Servidores Novos</div>
+                      </div>
+                      <div style={{ padding: '16px', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: '8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '28px', fontWeight: 800, color: '#2563eb' }}>{importResult.atualizados}</div>
+                        <div style={{ fontSize: '12px', color: '#1d4ed8', marginTop: '4px' }}>Servidores Atualizados</div>
+                      </div>
+                      <div style={{ padding: '16px', background: '#fefce8', border: '1px solid #fde047', borderRadius: '8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '28px', fontWeight: 800, color: '#ca8a04' }}>{importResult.shiftsInseridos}</div>
+                        <div style={{ fontSize: '12px', color: '#a16207', marginTop: '4px' }}>Registros de Plantões</div>
+                      </div>
+                    </div>
+
+                    {importResult.erros.length > 0 && (
+                      <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
+                        <div style={{ fontWeight: 700, color: '#dc2626', marginBottom: '8px' }}>⚠️ {importResult.erros.length} linha(s) com problema:</div>
+                        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                          {importResult.erros.map((e, i) => <div key={i} style={{ fontSize: '12px', color: '#b91c1c', marginBottom: '4px' }}>• {e}</div>)}
+                        </div>
+                      </div>
+                    )}
+
+                    <button className="btn btn-ghost" onClick={handleResetImport}>🔄 Nova Importação</button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
 

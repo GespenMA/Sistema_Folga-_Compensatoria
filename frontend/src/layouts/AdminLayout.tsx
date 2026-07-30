@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, Landmark, WalletCards, FileBadge, CalendarClock, BarChart3, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, X } from 'lucide-react';
+import { LayoutDashboard, Building2, FileBadge, BarChart3, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, X, Calendar } from 'lucide-react';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
@@ -37,13 +37,13 @@ export const AdminLayout: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--color-bg)' }}>
       
       {/* MOBILE HEADER BAR */}
-      <div className="mobile-header-bar" style={{ background: '#0f172a', padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'white', zIndex: 30 }}>
+      <div className="mobile-header-bar" style={{ background: '#0f172a', padding: '16px', alignItems: 'center', justifyContent: 'space-between', color: 'white', zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <ShieldAlert size={24} color="#60a5fa" />
           <h2 style={{ fontSize: '15px', margin: 0, fontWeight: 700 }}>SIFOC</h2>
         </div>
-        <button onClick={() => setIsMobileMenuOpen(true)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', padding: 0 }}>
-          <Menu size={24} />
+        <button type="button" onClick={() => setIsMobileMenuOpen(true)} aria-label="Abrir menu principal" style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', padding: 0 }}>
+          <Menu size={24} aria-hidden="true" />
         </button>
       </div>
 
@@ -51,7 +51,7 @@ export const AdminLayout: React.FC = () => {
         
         {/* MOBILE BACKDROP */}
         {isMobileMenuOpen && (
-          <div className="app-sidebar-backdrop" onClick={() => setIsMobileMenuOpen(false)}></div>
+          <button type="button" className="app-sidebar-backdrop" aria-label="Fechar menu principal" onClick={() => setIsMobileMenuOpen(false)}></button>
         )}
 
         {/* SIDEBAR - TEMA ESCURO */}
@@ -68,11 +68,13 @@ export const AdminLayout: React.FC = () => {
 
           {/* Close Button (Mobile only) */}
           <button 
+            type="button"
             className="mobile-only"
             onClick={() => setIsMobileMenuOpen(false)}
+            aria-label="Fechar menu principal"
             style={{ position: 'absolute', top: '20px', right: '16px', background: 'transparent', color: '#94a3b8', border: 'none', padding: '4px', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10 }}
           >
-            <X size={24} />
+            <X size={24} aria-hidden="true" />
           </button>
 
           <div style={{ marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: isCollapsed ? 'center' : 'flex-start', gap: '12px' }}>
@@ -87,29 +89,32 @@ export const AdminLayout: React.FC = () => {
             )}
           </div>
 
-          <nav style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingRight: isCollapsed ? '0' : '4px' }}>
+          <nav aria-label="Navegação administrativa" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingRight: isCollapsed ? '0' : '4px' }}>
             
-            <NavLink end to="/admin" style={getLinkStyle} title="Dashboard">
+            <NavLink end to="/admin" style={getLinkStyle} title="Dashboard" onClick={() => setIsMobileMenuOpen(false)}>
               <LayoutDashboard size={20} /> {!isCollapsed && "Dashboard"}
             </NavLink>
 
             {!isCollapsed && <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', marginTop: '24px', marginBottom: '12px', fontWeight: 600 }}>Operação</div>}
-            <NavLink to="/admin/estabelecimentos" style={getLinkStyle} title="Estabelecimentos">
+            <NavLink to="/admin/estabelecimentos" style={getLinkStyle} title="Estabelecimentos" onClick={() => setIsMobileMenuOpen(false)}>
               <Building2 size={20} /> {!isCollapsed && "Estabelecimentos"}
             </NavLink>
             
             {!isCollapsed && <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', marginTop: '24px', marginBottom: '12px', fontWeight: 600 }}>Solicitações</div>}
-            <NavLink to="/admin/solicitacoes" style={getLinkStyle} title="Solicitações">
+            <NavLink to="/admin/solicitacoes" style={getLinkStyle} title="Solicitações" onClick={() => setIsMobileMenuOpen(false)}>
               <FileBadge size={20} /> {!isCollapsed && "Solicitações"}
             </NavLink>
 
             {!isCollapsed && <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', marginTop: '24px', marginBottom: '12px', fontWeight: 600 }}>Gestão</div>}
-            <NavLink to="/admin/relatorios" style={getLinkStyle} title="Relatórios">
+            <NavLink to="/admin/ciclos" style={getLinkStyle} title="Ciclos" onClick={() => setIsMobileMenuOpen(false)}>
+              <Calendar size={20} /> {!isCollapsed && "Ciclos"}
+            </NavLink>
+            <NavLink to="/admin/relatorios" style={getLinkStyle} title="Relatórios" onClick={() => setIsMobileMenuOpen(false)}>
               <BarChart3 size={20} /> {!isCollapsed && "Relatórios"}
             </NavLink>
             
             {profile?.perfil === 'ADMIN' && (
-              <NavLink to="/admin/configuracoes" style={getLinkStyle} title="Configurações">
+              <NavLink to="/admin/configuracoes" style={getLinkStyle} title="Configurações" onClick={() => setIsMobileMenuOpen(false)}>
                 <Settings size={20} /> {!isCollapsed && "Configurações"}
               </NavLink>
             )}

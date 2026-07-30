@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Users, CalendarClock, FileBadge, ShoppingCart, ListOrdered, Calculator, BarChart3, Settings, UserCog, LogOut, ShieldAlert, ChevronLeft, ChevronRight, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarClock, ShoppingCart, Calculator, BarChart3, LogOut, ShieldAlert, ChevronLeft, ChevronRight, Menu, X } from 'lucide-react';
 
 export const EstabelecimentoLayout: React.FC = () => {
   const { signOut, profile } = useAuth();
@@ -42,7 +42,7 @@ export const EstabelecimentoLayout: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--color-bg)' }}>
       
       {/* MOBILE HEADER BAR */}
-      <div className="mobile-header-bar" style={{ background: '#0f172a', padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: 'white', zIndex: 30 }}>
+      <div className="mobile-header-bar" style={{ background: '#0f172a', padding: '16px', alignItems: 'center', justifyContent: 'space-between', color: 'white', zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <ShieldAlert size={24} color="#60a5fa" />
           <h2 style={{ fontSize: '15px', margin: 0, fontWeight: 700 }}>SIFOC</h2>

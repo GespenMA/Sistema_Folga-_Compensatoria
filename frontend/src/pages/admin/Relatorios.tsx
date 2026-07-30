@@ -85,7 +85,7 @@ export const Relatorios: React.FC = () => {
         throw error;
       }
       
-      setItems(data as RelatorioItem[]);
+      setItems((data ?? []) as unknown as RelatorioItem[]);
     } catch (error) {
       console.error('Erro ao buscar relatório:', error);
     } finally {

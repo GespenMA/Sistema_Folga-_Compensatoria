@@ -36,7 +36,7 @@ export const Folgas: React.FC = () => {
   const [employeeId, setEmployeeId] = useState('');
   const [periodoInicio, setPeriodoInicio] = useState('');
   const [periodoFim, setPeriodoFim] = useState('');
-  const [quantidadePlantoes, setQuantidadePlantoes] = useState<number>('');
+  const [quantidadePlantoes, setQuantidadePlantoes] = useState<number | ''>('');
   const [observacao, setObservacao] = useState('');
   const [shiftEdicao, setShiftEdicao] = useState<Shift | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

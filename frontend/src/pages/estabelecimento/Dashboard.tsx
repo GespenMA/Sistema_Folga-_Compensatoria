@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { 
   Calendar, DollarSign, Users, FileText, CheckCircle, AlertCircle, Clock, ArrowRight,
-  TrendingUp, Activity, BadgeAlert, PlusCircle, Calculator, UserPlus, FilePlus
+  TrendingUp, Activity, BadgeAlert, Calculator, UserPlus, FilePlus
 } from 'lucide-react';
 
 export const EstabelecimentoDashboard: React.FC = () => {
