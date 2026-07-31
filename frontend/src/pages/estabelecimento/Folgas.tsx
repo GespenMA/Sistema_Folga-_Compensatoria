@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -7,50 +8,83 @@ type Employee = {
   nome: string;
   matricula: string;
   saldo_plantoes: number;
+  saldo_minutos?: number;
+  position_id: string;
   positions?: { nome: string; codigo: string };
-};
-
-type Shift = {
-  id: string;
-  periodo_inicio: string;
-  periodo_fim: string;
-  quantidade_plantoes: number;
-  observacao: string;
-  employees: {
-    id: string;
-    nome: string;
-    matricula: string;
-    positions: { codigo: string };
-  };
+  compensatory_days?: { id: string; status: string }[];
+  folgasDisponiveis?: number;
 };
 
 export const Folgas: React.FC = () => {
   const { profile } = useAuth();
+  const navigate = useNavigate();
   const [activeCycle, setActiveCycle] = useState<any>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [employeeId, setEmployeeId] = useState('');
-  const [periodoInicio, setPeriodoInicio] = useState('');
-  const [periodoFim, setPeriodoFim] = useState('');
-  const [quantidadePlantoes, setQuantidadePlantoes] = useState<number | ''>('');
-  const [observacao, setObservacao] = useState('');
-  const [shiftEdicao, setShiftEdicao] = useState<Shift | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [buscaServidor, setBuscaServidor] = useState('');
+  // Modal Detalhes Servidor
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [detailShifts, setDetailShifts] = useState<any[]>([]);
+  const [detailFolgas, setDetailFolgas] = useState<any[]>([]);
+  const [detailPlusRequests, setDetailPlusRequests] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [detailTab, setDetailTab] = useState<'folgas' | 'plantoes' | 'plus'>('folgas');
 
-  // Busca nas tabelas
-  const [buscaTabelaServidor, setBuscaTabelaServidor] = useState('');
-  const [buscaTabelaPlantao, setBuscaTabelaPlantao] = useState('');
+  // Modal Plantão Plus
+  const [isPlusModalOpen, setIsPlusModalOpen] = useState(false);
+  const [plusEmployeeId, setPlusEmployeeId] = useState('');
+  const [plusSearchTerm, setPlusSearchTerm] = useState('');
+  const [plusDataPlantao, setPlusDataPlantao] = useState('');
+  const [plusJustificativa, setPlusJustificativa] = useState('');
+  const [isSubmittingPlus, setIsSubmittingPlus] = useState(false);
+
+  // Filtros e busca
+  const [busca, setBusca] = useState('');
+  const [ordemSaldos, setOrdemSaldos] = useState('nome_asc');
+  const [filtroStatus, setFiltroStatus] = useState<'todos' | 'com_folga' | 'acumulando'>('todos');
+  const [filtroCargoId, setFiltroCargoId] = useState('');
+
+  // Paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 24;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [busca, filtroCargoId, filtroStatus, ordemSaldos]);
+
+  // Toast de notificação
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Plantões Plus pendentes por employee (para badge nos cards)
+  const [plusPendentes, setPlusPendentes] = useState<Record<string, number>>({});
+
+
+
+  const showToast = useCallback((msg: string, type: 'success' | 'error' | 'warning' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ msg, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // Fechar modais com ESC
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsDetailsModalOpen(false);
+        setIsPlusModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
     if (profile?.establishment_id) {
       fetchInitialData();
     }
-  }, [profile]);
+  }, [profile?.establishment_id]);
 
   const fetchInitialData = async () => {
     setLoading(true);
@@ -65,7 +99,47 @@ export const Folgas: React.FC = () => {
 
       if (cycleData) {
         setActiveCycle(cycleData);
-        await fetchData(cycleData.id);
+        await fetchEmployees();
+      } else {
+        setLoading(false);
+      }
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      const [{ data: empData }, { data: plusData }] = await Promise.all([
+        supabase
+          .from('employees')
+          .select('id, nome, matricula, saldo_plantoes, saldo_minutos, position_id, positions(nome, codigo), compensatory_days(id, status)')
+          .eq('establishment_id', profile!.establishment_id)
+          .eq('ativo', true)
+          .order('nome'),
+        supabase
+          .from('purchase_requests')
+          .select('employee_id')
+          .eq('establishment_id', profile!.establishment_id)
+          .eq('tipo_solicitacao', 'PLANTAO_PLUS')
+          .eq('status', 'PENDENTE'),
+      ]);
+
+      if (empData) {
+        const parsed = (empData as any[]).map(emp => ({
+          ...emp,
+          folgasDisponiveis: emp.compensatory_days?.filter((f: any) => f.status === 'GERADA').length || 0
+        }));
+        setEmployees(parsed as Employee[]);
+      }
+
+      if (plusData) {
+        const counts: Record<string, number> = {};
+        (plusData as any[]).forEach(p => {
+          counts[p.employee_id] = (counts[p.employee_id] || 0) + 1;
+        });
+        setPlusPendentes(counts);
       }
     } catch (err) {
       console.error(err);
@@ -73,157 +147,241 @@ export const Folgas: React.FC = () => {
       setLoading(false);
     }
   };
-
-  const fetchData = async (cycleId: string) => {
+  const openDetailsModal = async (emp: Employee) => {
+    setSelectedEmployee(emp);
+    setDetailTab('plantoes');
+    setDetailShifts([]);
+    setDetailFolgas([]);
+    setDetailPlusRequests([]);
+    setIsDetailsModalOpen(true);
+    setLoadingHistory(true);
     try {
-      // 1. Funcionários e seus Saldos
-      const { data: empData } = await supabase
-        .from('employees')
-        .select('id, nome, matricula, saldo_plantoes, positions(nome, codigo)')
-        .eq('establishment_id', profile!.establishment_id)
-        .eq('ativo', true)
-        .order('nome');
-        
-      if (empData) setEmployees(empData as unknown as Employee[]);
-
-      // 2. Plantões Lançados neste Ciclo
-      const { data: shiftData } = await supabase
+      // Busca plantões do servidor (todas as entradas de saldo)
+      const { data: shiftsData } = await supabase
         .from('shifts')
-        .select(`
-          id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao,
-          employees (id, nome, matricula, positions(codigo))
-        `)
-        .eq('cycle_id', cycleId)
+        .select('id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome)')
+        .eq('employee_id', emp.id)
         .order('created_at', { ascending: false });
+      if (shiftsData) setDetailShifts(shiftsData);
 
-      if (shiftData) setShifts(shiftData as unknown as Shift[]);
+      // Busca folgas geradas
+      const { data: folgasData } = await supabase
+        .from('compensatory_days')
+        .select('id, status, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, cycles(nome)')
+        .eq('employee_id', emp.id)
+        .order('generated_at', { ascending: false });
+      if (folgasData) setDetailFolgas(folgasData);
+
+      // Busca Plantão Plus
+      const { data: plusData } = await supabase
+        .from('purchase_requests')
+        .select('id, tipo_solicitacao, data_plantao, valor, status, justificativa, requested_at')
+        .eq('employee_id', emp.id)
+        .eq('tipo_solicitacao', 'PLANTAO_PLUS')
+        .order('requested_at', { ascending: false });
+      if (plusData) setDetailPlusRequests(plusData);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
-  const openModal = () => {
-    setShiftEdicao(null);
-    setEmployeeId('');
-    setPeriodoInicio('');
-    setPeriodoFim('');
-    setQuantidadePlantoes('');
-    setObservacao('');
-    setBuscaServidor('');
-    setIsModalOpen(true);
+  const openPlusModal = (empId?: string) => {
+    setPlusEmployeeId(empId || '');
+    setPlusSearchTerm('');
+    setPlusDataPlantao('');
+    setPlusJustificativa('');
+    setIsPlusModalOpen(true);
   };
 
-  const openEditModal = (shift: Shift) => {
-    setShiftEdicao(shift);
-    setEmployeeId(shift.employees.id);
-    setPeriodoInicio(shift.periodo_inicio);
-    setPeriodoFim(shift.periodo_fim);
-    setQuantidadePlantoes(shift.quantidade_plantoes);
-    setObservacao(shift.observacao || '');
-    setBuscaServidor('');
-    setIsModalOpen(true);
-  };
-
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSavePlus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile?.establishment_id || !activeCycle) return;
 
-    if (periodoFim > activeCycle.data_fim) {
-      alert(`O Período Fim não pode ultrapassar o encerramento do ciclo atual (${new Date(activeCycle.data_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}).`);
+    if (plusDataPlantao > activeCycle.data_fim) {
+      showToast(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`, 'warning');
+      return;
+    }
+    if (plusJustificativa.length < 50) {
+      showToast('A justificativa precisa ter pelo menos 50 caracteres.', 'warning');
       return;
     }
 
-    setIsSubmitting(true);
+    setIsSubmittingPlus(true);
 
     try {
-      if (shiftEdicao) {
-        const { error } = await supabase.from('shifts')
-          .update({
-            employee_id: employeeId,
-            periodo_inicio: periodoInicio,
-            periodo_fim: periodoFim,
-            quantidade_plantoes: Number(quantidadePlantoes),
-            observacao
-          })
-          .eq('id', shiftEdicao.id);
+      const emp = employees.find(e => e.id === plusEmployeeId);
+      if (!emp || !emp.position_id) throw new Error("Cargo do servidor não encontrado.");
+
+      const { data: posVal } = await supabase
+        .from('position_values')
+        .select('id, valor')
+        .eq('position_id', emp.position_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
         
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('shifts')
-          .insert([{
-            employee_id: employeeId,
-            cycle_id: activeCycle.id,
-            periodo_inicio: periodoInicio,
-            periodo_fim: periodoFim,
-            quantidade_plantoes: Number(quantidadePlantoes),
-            observacao,
-            created_by: profile.id
-          }]);
-        
-        if (error) throw error;
+      if (!posVal) throw new Error("Não há valor financeiro configurado para o cargo deste servidor.");
+
+      // VERIFICAÇÃO DE DATA DUPLICADA: Impede compra na mesma data
+      const { data: existingPlus } = await supabase
+        .from('purchase_requests')
+        .select('id')
+        .eq('employee_id', emp.id)
+        .eq('data_plantao', plusDataPlantao)
+        .neq('status', 'REJEITADA')
+        .neq('status', 'CANCELADA')
+        .limit(1);
+
+      if (existingPlus && existingPlus.length > 0) {
+        showToast('Este servidor já possui uma solicitação de plantão para esta mesma data.', 'warning');
+        setIsSubmittingPlus(false);
+        return;
       }
 
-      setIsModalOpen(false);
-      fetchData(activeCycle.id); // Recarrega para trazer os novos saldos atualizados pela Trigger
-    } catch (err: any) {
-      alert(err.message || 'Erro ao salvar plantão. Pode haver conflito de datas.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleCancelShift = async (shift: Shift) => {
-    if (!window.confirm('Tem certeza que deseja cancelar este registro de plantões? O saldo do servidor será reduzido.')) return;
-    
-    try {
-      const { error } = await supabase.from('shifts').delete().eq('id', shift.id);
+      const { error } = await supabase.from('purchase_requests')
+        .insert([{
+          tipo_solicitacao: 'PLANTAO_PLUS',
+          data_plantao: plusDataPlantao,
+          establishment_id: profile.establishment_id,
+          cycle_id: activeCycle.id,
+          employee_id: emp.id,
+          position_id: emp.position_id,
+          valor: posVal.valor,
+          valor_historico_id: posVal.id,
+          justificativa: plusJustificativa,
+          requested_by: profile.id
+        }]);
+      
       if (error) {
-        if (error.message.includes('folgas ativas que dependem')) {
-           alert('Ação negada: O servidor já consumiu folgas que dependem destes plantões (Saldo ficaria negativo). Para excluir este plantão, cancele a solicitação de compra da folga antes.');
-        } else {
-           throw error;
-        }
-      } else {
-        fetchData(activeCycle.id);
+         if (error.message.includes('financeiro insuficiente')) {
+             showToast('Orçamento insuficiente para lançar este Plantão Plus.', 'error');
+         } else if (error.message.includes('Limite quantitativo')) {
+             showToast('O limite planejado de plantões extras/folgas para este cargo já foi atingido.', 'error');
+         } else {
+             throw error;
+         }
+         return;
       }
+
+      setIsPlusModalOpen(false);
+      showToast('Plantão Plus registrado e enviado para aprovação!', 'success');
+      await fetchEmployees(); // Refetch para atualizar badges e dados
     } catch (err: any) {
-      console.error("ERRO COMPLETO:", err);
-      alert(`Erro detalhado: ${JSON.stringify(err, null, 2)} \n\n${err.message || 'Erro ao cancelar plantão.'}`);
+      showToast(err.message || 'Erro ao registrar Plantão Plus.', 'error');
+    } finally {
+      setIsSubmittingPlus(false);
     }
   };
 
-  // Calculando estatísticas dos cards
+  // Métricas KPI
   const totalServidores = employees.length;
-  const totalPlantoesLancados = shifts.reduce((acc, curr) => acc + curr.quantidade_plantoes, 0);
-  const folgasProntas = employees.filter(emp => emp.saldo_plantoes >= 21).length;
+  const folgasProntas = employees.filter(e => (e.folgasDisponiveis || 0) > 0).length;
+  const proximos = employees.filter(e => {
+    const min = (e.saldo_plantoes * 720) + (e.saldo_minutos || 0);
+    return min >= (120 * 60) && (e.folgasDisponiveis || 0) === 0; // >= 120h
+  }).length;
+  const totalFolgas = employees.reduce((acc, e) => acc + (e.folgasDisponiveis || 0), 0);
 
-  // Filtrando tabelas
-  const filteredEmployeesTable = employees.filter(emp => 
-    (emp.nome || '').toLowerCase().includes(buscaTabelaServidor.toLowerCase()) || 
-    (emp.matricula || '').includes(buscaTabelaServidor)
-  );
-  
-  const filteredShiftsTable = shifts.filter(shift => 
-    (shift.employees?.nome || '').toLowerCase().includes(buscaTabelaPlantao.toLowerCase()) || 
-    (shift.employees?.matricula || '').includes(buscaTabelaPlantao)
-  );
+  // Lista única de cargos para o filtro
+  const cargosDisponiveis = Array.from(
+    new Map(employees
+      .filter(e => e.position_id && e.positions?.nome)
+      .map(e => [e.position_id, { id: e.position_id, nome: e.positions!.nome! }])
+    ).values()
+  ).sort((a, b) => a.nome.localeCompare(b.nome));
 
-  if (loading) return <div>Carregando banco de plantões...</div>;
+  // Aplicar filtros
+  let filtered = employees.filter(emp =>
+    (emp.nome || '').toLowerCase().includes(busca.toLowerCase()) ||
+    (emp.matricula || '').includes(busca)
+  );
+  if (filtroStatus === 'com_folga') filtered = filtered.filter(e => (e.folgasDisponiveis || 0) > 0);
+  if (filtroStatus === 'acumulando') filtered = filtered.filter(e => (e.folgasDisponiveis || 0) === 0);
+  if (filtroCargoId) filtered = filtered.filter(e => e.position_id === filtroCargoId);
+
+  if (ordemSaldos === 'saldo_desc') {
+    filtered = filtered.sort((a, b) => {
+      const minA = (a.saldo_plantoes * 720) + (a.saldo_minutos || 0);
+      const minB = (b.saldo_plantoes * 720) + (b.saldo_minutos || 0);
+      return minB - minA;
+    });
+  } else if (ordemSaldos === 'folgas_desc') {
+    filtered = filtered.sort((a, b) => (b.folgasDisponiveis || 0) - (a.folgasDisponiveis || 0));
+  } else {
+    filtered = filtered.sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const paginatedFiltered = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  if (loading) return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', gap: '16px', color: 'var(--color-text-muted)' }}>
+      <div style={{ width: '36px', height: '36px', border: '3px solid var(--color-divider)', borderTopColor: 'var(--color-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      <span style={{ fontSize: '14px' }}>Carregando dados da unidade...</span>
+    </div>
+  );
 
   return (
-    <div>
-      <div style={{ marginBottom: 'var(--space-6)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div style={{ position: 'relative' }}>
+
+      {/* ─── Toast de Notificação ──────────────────────── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: '28px', right: '28px', zIndex: 9999,
+          padding: '14px 20px', borderRadius: '10px', maxWidth: '380px',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+          animation: 'slideInRight 0.25s ease',
+          background: toast.type === 'success' ? '#10b981' : toast.type === 'error' ? '#ef4444' : '#eab308',
+          color: 'white',
+        }}>
+          <span style={{ fontSize: '18px', flexShrink: 0 }}>
+            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : '⚠️'}
+          </span>
+          <span style={{ fontSize: '13px', fontWeight: 600, lineHeight: 1.4 }}>{toast.msg}</span>
+          <button
+            onClick={() => setToast(null)}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '16px', opacity: 0.8, flexShrink: 0 }}
+          >×</button>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(40px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      <div style={{ marginBottom: 'var(--space-5)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h2 style={{ margin: 0 }}>Lançamento de Plantões</h2>
-          <p className="text-muted" style={{ margin: 0 }}>
-            Registre os dias trabalhados. O sistema acumulará o saldo e gerará 1 folga automaticamente a cada 21 plantões.
+          <p className="text-muted" style={{ margin: '4px 0 0' }}>
+            {activeCycle
+              ? `Ciclo ativo: ${activeCycle.nome} — saldo acumula automaticamente a cada 252 horas (21 plantões) trabalhadas.`
+              : 'Nenhum ciclo ativo encontrado.'}
           </p>
         </div>
         {activeCycle && (
-          <button className="btn btn-primary blueprint" onClick={openModal}>
-            <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
-            + Lançar Plantão
-          </button>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button 
+              onClick={() => navigate('/estabelecimento/solicitacoes')} 
+              style={{ padding: '0 16px', background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-divider)', borderRadius: '4px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-divider)'; e.currentTarget.style.color = 'var(--color-text)'; }}
+            >
+              <span style={{ fontSize: '16px' }}>🛒</span> Solicitar Compra
+            </button>
+            <button className="btn btn-primary blueprint" onClick={() => openPlusModal()}>
+              <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+              + Plantão Plus
+            </button>
+          </div>
         )}
       </div>
 
@@ -235,233 +393,597 @@ export const Folgas: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Cards de Resumo */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
-            <div className="blueprint card elev-sm" style={{ padding: '12px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-surface)' }}>
-              <span style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Total de Servidores</span>
-              <span style={{ fontSize: '32px', fontWeight: 800, color: 'var(--color-text)', marginTop: '4px' }}>{totalServidores}</span>
+          {/* KPIs - 4 cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '32px' }}>
+            <div className="blueprint card elev-sm" style={{ padding: '14px 18px', background: 'var(--color-surface)' }}>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Total de Servidores</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px' }}>{totalServidores}</div>
             </div>
-            <div className="blueprint card elev-sm" style={{ padding: '12px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-surface)' }}>
-              <span style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Plantões Lançados (Ciclo)</span>
-              <span style={{ fontSize: '32px', fontWeight: 800, color: 'var(--color-text)', marginTop: '4px' }}>{totalPlantoesLancados}</span>
+            <div className="blueprint card elev-sm" style={{ padding: '14px 18px', background: 'rgba(16,185,129,0.06)', borderLeft: '3px solid #10b981' }}>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#10b981', fontWeight: 600 }}>🎉 Com Folga Pronta</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#10b981', marginTop: '4px' }}>{folgasProntas}</div>
             </div>
-            <div className="blueprint card elev-sm" style={{ padding: '12px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--color-surface)' }}>
-              <span style={{ fontSize: '13px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Folgas Prontas para Compra</span>
-              <span style={{ fontSize: '32px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '4px' }}>{folgasProntas}</span>
+            <div className="blueprint card elev-sm" style={{ padding: '14px 18px', background: 'rgba(234,179,8,0.06)', borderLeft: '3px solid #eab308' }}>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: '#eab308', fontWeight: 600 }}>⏳ Próximos (≥120h)</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: '#eab308', marginTop: '4px' }}>{proximos}</div>
+            </div>
+            <div className="blueprint card elev-sm" style={{ padding: '14px 18px', background: 'rgba(59,130,246,0.06)', borderLeft: '3px solid var(--color-primary)' }}>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-primary)', fontWeight: 600 }}>📦 Total de Folgas</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '4px' }}>{totalFolgas}</div>
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 'var(--space-6)' }}>
-            {/* Lado Esquerdo: Saldos */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-                <h3 style={{ margin: 0 }}>Saldos da Unidade</h3>
-              </div>
-              <input 
-                type="text" 
-                className="input" 
-                placeholder="Buscar servidor..." 
-                value={buscaTabelaServidor}
-                onChange={(e) => setBuscaTabelaServidor(e.target.value)}
-                style={{ marginBottom: 'var(--space-3)' }}
-              />
-              <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
-                {filteredEmployeesTable.length === 0 ? (
-                  <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                    Nenhum servidor encontrado.
-                  </div>
-                ) : (
-                  <div>
-                    {filteredEmployeesTable.map(emp => (
-                      <div key={emp.id} style={{ padding: 'var(--space-3) var(--space-4)', borderBottom: '1px solid var(--color-divider)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: '13px', textTransform: 'uppercase' }}>{emp.nome}</div>
-                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{emp.positions?.codigo} ({emp.matricula})</div>
-                          </div>
-                          <div style={{ textAlign: 'right', fontWeight: 600, fontSize: '14px', color: emp.saldo_plantoes >= 21 ? 'var(--color-primary)' : 'inherit' }}>
-                            {emp.saldo_plantoes} <span style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>/21</span>
-                          </div>
+          {/* Busca + Filtros Rápidos + Cargo + Ordenação */}
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              className="input"
+              placeholder="🔍 Buscar por nome ou matrícula..."
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              style={{ flex: 1, minWidth: '180px' }}
+            />
+            <select
+              className="input"
+              style={{ width: '200px' }}
+              value={filtroCargoId}
+              onChange={(e) => setFiltroCargoId(e.target.value)}
+            >
+              <option value="">Todos os cargos</option>
+              {cargosDisponiveis.map(c => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {([['todos', 'Todos', 'var(--color-text-muted)'], ['com_folga', '🎉 Com Folga', '#10b981'], ['acumulando', '⏳ Acumulando', '#eab308']] as const).map(([val, label, cor]) => (
+                <button
+                  key={val}
+                  onClick={() => setFiltroStatus(val)}
+                  style={{
+                    padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                    background: filtroStatus === val ? cor : 'var(--color-surface)',
+                    color: filtroStatus === val ? (val === 'todos' ? 'var(--color-text)' : 'white') : cor,
+                    outline: filtroStatus === val ? `2px solid ${cor}` : '1px solid var(--color-divider)',
+                    transition: 'all 0.15s'
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <select
+              className="input"
+              style={{ width: '150px' }}
+              value={ordemSaldos}
+              onChange={(e) => setOrdemSaldos(e.target.value)}
+            >
+              <option value="nome_asc">Nome (A-Z)</option>
+              <option value="saldo_desc">Maior Saldo</option>
+              <option value="folgas_desc">Mais Folgas</option>
+            </select>
+          </div>
+
+          {/* Contador de resultados */}
+          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '12px' }}>
+            Exibindo <strong>{paginatedFiltered.length}</strong> de <strong>{filtered.length}</strong> servidor{filtered.length !== 1 ? 'es' : ''} filtrado{filtered.length !== 1 ? 's' : ''} (Total: {totalServidores})
+            {(busca || filtroCargoId || filtroStatus !== 'todos') && (
+              <button
+                onClick={() => { setBusca(''); setFiltroCargoId(''); setFiltroStatus('todos'); }}
+                style={{ marginLeft: '10px', fontSize: '11px', color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Limpar filtros
+              </button>
+            )}
+          </div>
+
+          {/* Grid de Cards */}
+          {paginatedFiltered.length === 0 ? (
+            <div className="blueprint card" style={{ padding: 'var(--space-8)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔍</div>
+              <p style={{ margin: 0 }}>Nenhum servidor encontrado com os filtros aplicados.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-3)' }}>
+              {paginatedFiltered.map((emp, idx) => {
+                const temFolga = (emp.folgasDisponiveis || 0) > 0;
+                const totalMinutos = (emp.saldo_plantoes * 720) + (emp.saldo_minutos || 0);
+                const horas = Math.floor(totalMinutos / 60);
+                const minutosStr = String(totalMinutos % 60).padStart(2, '0');
+                
+                const proximo = !temFolga && horas >= 120;
+                const pct = Math.min((totalMinutos / 15120) * 100, 100); // 15120 = 252h = 21 plantoes
+                const corBorda = temFolga ? '#10b981' : proximo ? '#eab308' : 'var(--color-divider)';
+                const plusPendente = plusPendentes[emp.id] || 0;
+                return (
+                  <div
+                    key={emp.id}
+                    className="blueprint card"
+                    style={{
+                      padding: '16px', cursor: 'pointer',
+                      transition: 'transform 0.15s, box-shadow 0.15s',
+                      background: 'var(--color-surface)',
+                      borderLeft: `4px solid ${corBorda}`,
+                      animation: `fadeInUp 0.25s ease both`,
+                      animationDelay: `${idx * 30}ms`,
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.15)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = ''; (e.currentTarget as HTMLElement).style.boxShadow = ''; }}
+                    onClick={() => openDetailsModal(emp)}
+                  >
+                    {/* Cabeçalho do Card */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '13px', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {emp.nome}
                         </div>
-                        {/* Barra de Progresso */}
-                        <div style={{ height: '6px', background: 'var(--color-divider)', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ 
-                            height: '100%', 
-                            background: emp.saldo_plantoes >= 21 ? 'var(--color-primary)' : '#3b82f6', 
-                            width: `${Math.min((emp.saldo_plantoes / 21) * 100, 100)}%`,
-                            transition: 'width 0.3s ease'
-                          }}></div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {emp.positions?.nome || emp.positions?.codigo} &bull; Mat: {emp.matricula}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '8px' }}>
-                ℹ️ Ao atingir 21 plantões no saldo, o sistema desconta 21 pontos e envia 1 Folga para a tela de "Comprar Folgas".
-              </div>
-            </div>
+                      <button
+                        title="Lançar Plantão Plus"
+                        onClick={e => { e.stopPropagation(); openPlusModal(emp.id); }}
+                        style={{
+                          marginLeft: '8px', flexShrink: 0, padding: '4px 10px', borderRadius: '14px',
+                          border: '1px solid rgba(59,130,246,0.3)', background: 'rgba(59,130,246,0.05)', color: 'var(--color-primary)',
+                          cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px',
+                          transition: 'background 0.2s'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(59,130,246,0.15)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'rgba(59,130,246,0.05)'}
+                      >
+                        <span>⚡</span> Lançar Plus
+                      </button>
+                    </div>
 
-            {/* Lado Direito: Lançamentos */}
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-                <h3 style={{ margin: 0 }}>Plantões Lançados no Ciclo ({activeCycle?.nome})</h3>
-              </div>
-              <input 
-                type="text" 
-                className="input" 
-                placeholder="Buscar por servidor ou matrícula..." 
-                value={buscaTabelaPlantao}
-                onChange={(e) => setBuscaTabelaPlantao(e.target.value)}
-                style={{ marginBottom: 'var(--space-3)' }}
-              />
-              <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid var(--color-divider)', background: 'var(--color-surface)' }}>
-                      <th style={{ padding: 'var(--space-3)' }}>Servidor</th>
-                      <th style={{ padding: 'var(--space-3)' }}>Período Trabalhado</th>
-                      <th style={{ padding: 'var(--space-3)', textAlign: 'center' }}>Qtd. Plantões</th>
-                      <th style={{ padding: 'var(--space-3)', textAlign: 'right' }}>Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredShiftsTable.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                          Nenhum plantão registrado ou encontrado neste ciclo.
-                        </td>
-                      </tr>
-                    ) : filteredShiftsTable.map(shift => (
-                      <tr key={shift.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
-                        <td style={{ padding: 'var(--space-3)' }}>
-                          <div style={{ fontWeight: 500 }}>{shift.employees?.nome}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{shift.employees?.positions?.codigo}</div>
-                        </td>
-                        <td style={{ padding: 'var(--space-3)' }}>
-                          {new Date(shift.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(shift.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}
-                        </td>
-                        <td style={{ padding: 'var(--space-3)', textAlign: 'center', fontWeight: 700, color: 'var(--color-primary)' }}>
-                          +{shift.quantidade_plantoes}
-                        </td>
-                        <td style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
-                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', marginRight: '4px' }} onClick={() => openEditModal(shift)}>
-                            ✏️
-                          </button>
-                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--color-danger)' }} onClick={() => handleCancelShift(shift)}>
-                            🗑️
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    {/* Saldo + Barra */}
+                    <div style={{ marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Saldo para próxima folga</span>
+                        <span style={{ fontWeight: 800, fontSize: '16px', color: temFolga ? '#10b981' : 'var(--color-text)' }}>
+                          {horas}h {minutosStr}m<span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--color-text-muted)' }}>/252h</span>
+                        </span>
+                      </div>
+                      <div style={{ height: '8px', background: 'var(--color-divider)', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div style={{
+                          height: '100%', borderRadius: '4px', transition: 'width 0.4s ease',
+                          width: `${pct}%`,
+                          background: temFolga
+                            ? 'linear-gradient(90deg, #10b981, #34d399)'
+                            : proximo
+                              ? 'linear-gradient(90deg, #eab308, #f59e0b)'
+                              : 'linear-gradient(90deg, #3b82f6, #60a5fa)'
+                        }} />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {temFolga && (
+                        <span style={{
+                          fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '12px',
+                          background: 'rgba(16,185,129,0.12)', color: '#10b981', border: '1px solid rgba(16,185,129,0.25)'
+                        }}>
+                          🎉 {emp.folgasDisponiveis} Folga{emp.folgasDisponiveis! > 1 ? 's' : ''} disponível
+                        </span>
+                      )}
+                      {proximo && (
+                        <span style={{
+                          fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '12px',
+                          background: 'rgba(234,179,8,0.12)', color: '#eab308', border: '1px solid rgba(234,179,8,0.25)'
+                        }}>
+                          ⏳ Próximo da folga
+                        </span>
+                      )}
+                      {!temFolga && !proximo && (
+                        <span style={{
+                          fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '12px',
+                          background: 'var(--color-bg)', color: 'var(--color-text-muted)', border: '1px solid var(--color-divider)'
+                        }}>
+                          Acumulando
+                        </span>
+                      )}
+                      {plusPendente > 0 && (
+                        <span style={{
+                          fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '12px',
+                          background: 'rgba(59,130,246,0.12)', color: 'var(--color-primary)', border: '1px solid rgba(59,130,246,0.25)'
+                        }}>
+                          ⚡ {plusPendente} Pl. Plus pendente{plusPendente > 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          )}
+
+          {/* Controles de Paginação */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '32px' }}>
+              <button 
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--color-divider)', background: 'var(--color-surface)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1 }}
+              >
+                Anterior
+              </button>
+              
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {Array.from({ length: totalPages }).map((_, i) => {
+                  const page = i + 1;
+                  // Exibir apenas páginas próximas ou extremidades (lógica simplificada para não poluir caso tenha muitas páginas)
+                  if (page === 1 || page === totalPages || (page >= currentPage - 2 && page <= currentPage + 2)) {
+                    return (
+                      <button 
+                        key={page}
+                        onClick={() => setCurrentPage(page)}
+                        style={{ 
+                          width: '32px', height: '32px', borderRadius: '4px', border: '1px solid',
+                          borderColor: currentPage === page ? 'var(--color-primary)' : 'var(--color-divider)',
+                          background: currentPage === page ? 'var(--color-primary)' : 'var(--color-surface)',
+                          color: currentPage === page ? 'white' : 'var(--color-text)',
+                          cursor: 'pointer', fontWeight: currentPage === page ? 700 : 500
+                        }}
+                      >
+                        {page}
+                      </button>
+                    );
+                  }
+                  if (page === currentPage - 3 || page === currentPage + 3) {
+                    return <span key={page} style={{ padding: '0 4px', color: 'var(--color-text-muted)' }}>...</span>;
+                  }
+                  return null;
+                })}
+              </div>
+
+              <button 
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--color-divider)', background: 'var(--color-surface)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1 }}
+              >
+                Próxima
+              </button>
+            </div>
+          )}
+
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '16px', textAlign: 'center' }}>
+            ℹ️ Clique em um servidor para ver o extrato completo. Use ⚡ para lançar Plantão Plus direto do card.
           </div>
-        </div>
-      </>
+        </>
       )}
 
-      {isModalOpen && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-        }}>
-          <div className="blueprint card elev-md" style={{ width: '500px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
+
+
+      {isPlusModalOpen && (
+        <div
+          onClick={() => { setIsPlusModalOpen(false); openPlusModal(); /* limpa o form */ }}
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+          }}
+        >
+          <div
+            className="blueprint card elev-md"
+            onClick={e => e.stopPropagation()}
+            style={{ width: '500px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}
+          >
             <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
             <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>
-              {shiftEdicao ? 'Editar Lançamento' : 'Registrar Plantões Trabalhados'}
+              Lançar Plantão Plus (Indenização)
             </h3>
+
+            <div style={{ marginBottom: '20px', padding: '12px 16px', background: 'rgba(239,68,68,0.05)', borderRadius: '8px', borderLeft: '4px solid var(--color-danger)', fontSize: '13px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
+              <strong>⚠️ ATENÇÃO:</strong> O lançamento de <strong>Plantão Plus</strong> é passível de rigorosa auditoria pelos órgãos de controle. Ao registrar este plantão, a direção do estabelecimento penal está atestando e se responsabilizando integralmente de que o servidor realmente prestou o serviço suplementar nas datas e condições informadas.
+            </div>
             
-            <form onSubmit={handleSave}>
+            <form onSubmit={handleSavePlus}>
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
                 <label>Servidor *</label>
                 <input 
                   type="text" 
                   className="input" 
-                  placeholder="Buscar por nome ou matrícula..." 
-                  value={buscaServidor}
-                  onChange={(e) => setBuscaServidor(e.target.value)}
+                  placeholder="Pesquisar por nome ou matrícula..." 
+                  value={plusSearchTerm}
+                  onChange={(e) => setPlusSearchTerm(e.target.value)}
                   style={{ marginBottom: '8px' }}
                 />
                 <select 
                   className="input" 
-                  value={employeeId} 
-                  onChange={(e) => setEmployeeId(e.target.value)}
+                  value={plusEmployeeId} 
+                  onChange={(e) => setPlusEmployeeId(e.target.value)}
                   required
                 >
                   <option value="">Selecione o servidor...</option>
-                  {employees.filter(emp => 
-                    (emp.nome || '').toLowerCase().includes((buscaServidor || '').toLowerCase()) || 
-                    (emp.matricula || '').includes(buscaServidor || '')
-                  ).map(emp => (
+                  {employees
+                    .filter(emp => (emp.nome + emp.matricula).toLowerCase().includes(plusSearchTerm.toLowerCase()))
+                    .map(emp => (
                     <option key={emp.id} value={emp.id}>
-                      {emp.nome} - Mat: {emp.matricula} ({emp.positions?.codigo}) (Saldo atual: {emp.saldo_plantoes})
+                      {emp.nome} - Mat: {emp.matricula}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
-                <div className="field">
-                  <label>Período Início *</label>
-                  <input 
-                    className="input" 
-                    type="date" 
-                    value={periodoInicio} 
-                    onChange={(e) => setPeriodoInicio(e.target.value)} 
-                    required 
-                  />
-                </div>
-                <div className="field">
-                  <label>Período Fim *</label>
-                  <input 
-                    className="input" 
-                    type="date" 
-                    value={periodoFim} 
-                    max={activeCycle?.data_fim}
-                    onChange={(e) => setPeriodoFim(e.target.value)} 
-                    required 
-                  />
-                </div>
-              </div>
-              
-              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)', background: 'var(--color-bg)', padding: '10px', borderRadius: '4px', borderLeft: '3px solid var(--color-primary)' }}>
-                <strong>ℹ️ Dica de Preenchimento:</strong><br/>
-                <strong>Período Início:</strong> O dia em que o servidor iniciou este bloco de plantões.<br/>
-                <strong>Período Fim:</strong> O dia do último plantão trabalhado (lembrando que não pode ultrapassar a data de encerramento do ciclo atual).
-              </div>
-
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
-                <label>Qtd. de Plantões Trabalhados *</label>
+                <label>Data do Plantão Extraordinário *</label>
                 <input 
                   className="input" 
-                  type="number" 
-                  min="1"
-                  value={quantidadePlantoes} 
-                  onChange={(e) => setQuantidadePlantoes(Number(e.target.value))} 
+                  type="date" 
+                  value={plusDataPlantao} 
+                  max={activeCycle?.data_fim}
+                  onChange={(e) => setPlusDataPlantao(e.target.value)} 
                   required 
                 />
               </div>
 
               <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
-                <label>Observação (Opcional)</label>
+                <label>Justificativa (Mín. 50 caracteres) *</label>
                 <textarea 
                   className="input" 
-                  value={observacao} 
-                  onChange={(e) => setObservacao(e.target.value)} 
-                  rows={2}
+                  value={plusJustificativa} 
+                  onChange={(e) => setPlusJustificativa(e.target.value)} 
+                  rows={4}
+                  required
+                  placeholder="Justifique detalhadamente o motivo do plantão extraordinário..."
+                  minLength={50}
+                  maxLength={2000}
                 />
+                <div style={{ fontSize: '11px', color: plusJustificativa.length < 50 ? 'var(--color-danger)' : 'var(--color-primary)', marginTop: '4px', textAlign: 'right' }}>
+                  {plusJustificativa.length}/50 caracteres mínimos
+                </div>
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setIsModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary blueprint" disabled={isSubmitting}>
+                <button type="button" className="btn btn-ghost" onClick={() => setIsPlusModalOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary blueprint" disabled={isSubmittingPlus}>
                   <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
-                  {isSubmitting ? 'Salvando...' : 'Salvar Plantões'}
+                  {isSubmittingPlus ? 'Enviando...' : 'Solicitar Pagamento'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isDetailsModalOpen && selectedEmployee && (
+        <div
+          onClick={() => setIsDetailsModalOpen(false)}
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', justifyContent: 'flex-end'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="blueprint card"
+            style={{
+              width: '520px', height: '100vh', background: 'var(--color-surface)',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              boxShadow: '-8px 0 32px rgba(0,0,0,0.3)'
+            }}
+          >
+            <i className="corner tl"></i><i className="corner tr"></i>
+
+            {/* Cabeçalho */}
+            <div style={{ padding: '24px 24px 16px', flexShrink: 0, borderBottom: '1px solid var(--color-divider)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '16px', textTransform: 'uppercase' }}>{selectedEmployee.nome}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                    {selectedEmployee.positions?.nome || selectedEmployee.positions?.codigo} &bull; Mat: {selectedEmployee.matricula}
+                  </div>
+                </div>
+                <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setIsDetailsModalOpen(false)}>✕</button>
+              </div>
+
+              {/* Cards de Resumo */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div style={{ background: 'var(--color-bg)', borderRadius: '8px', padding: '10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '4px' }}>Saldo</div>
+                  <div style={{ fontSize: '20px', fontWeight: 800 }}>
+                    {Math.floor(((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) / 60)}h 
+                    <span style={{ fontSize: '14px', marginLeft: '2px' }}>
+                      {String(((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) % 60).padStart(2, '0')}m
+                    </span>
+                  </div>
+                  <div style={{ height: '4px', background: 'var(--color-divider)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', background: 'var(--color-primary)', width: `${Math.min((((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) / 15120) * 100, 100)}%` }}></div>
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#10b981', fontWeight: 600, marginBottom: '4px' }}>Folgas</div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>{detailFolgas.filter(f => f.status === 'GERADA').length}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>disponíveis</div>
+                </div>
+                <div style={{ background: 'rgba(59,130,246,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(59,130,246,0.2)' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-primary)', fontWeight: 600, marginBottom: '4px' }}>Pl. Plus</div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--color-primary)' }}>{detailPlusRequests.length}</div>
+                  <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>lançado(s)</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Abas */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--color-divider)', flexShrink: 0 }}>
+              {([['plantoes', '📋 Plantões'], ['folgas', '🎉 Folgas'], ['plus', '⚡ Plantão Plus']] as const).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  onClick={() => setDetailTab(tab)}
+                  style={{
+                    flex: 1, padding: '12px 8px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+                    background: 'transparent',
+                    color: detailTab === tab ? 'var(--color-primary)' : 'var(--color-text-muted)',
+                    borderBottom: detailTab === tab ? '2px solid var(--color-primary)' : '2px solid transparent',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Conteúdo da Aba */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
+              {loadingHistory ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: '16px', color: 'var(--color-text-muted)' }}>
+                  <div style={{ width: '28px', height: '28px', border: '3px solid var(--color-divider)', borderTopColor: 'var(--color-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                  <span style={{ fontSize: '13px' }}>Carregando histórico...</span>
+                </div>
+              ) : (
+                <>
+                  {/* ABA: Folgas */}
+                  {detailTab === 'folgas' && (
+                    <div>
+                      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
+                        Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)
+                      </div>
+                      {detailFolgas.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhuma folga gerada ainda.</div>
+                      ) : detailFolgas.map((f: any) => (
+                        <div key={f.id} style={{
+                          padding: '16px', marginBottom: '12px', borderRadius: '8px',
+                          background: 'var(--color-bg)', border: '1px solid var(--color-divider)',
+                          display: 'flex', flexDirection: 'column', gap: '8px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>🎉</span> Direito à Folga Compensatória
+                            </div>
+                            <span style={{
+                              fontSize: '11px', padding: '4px 10px', borderRadius: '12px', fontWeight: 700,
+                              background: f.status === 'GERADA' ? 'rgba(16,185,129,0.1)' : f.status === 'AGUARDANDO_DECISAO' ? 'rgba(234,179,8,0.1)' : 'rgba(239,68,68,0.1)',
+                              color: f.status === 'GERADA' ? '#10b981' : f.status === 'AGUARDANDO_DECISAO' ? '#eab308' : '#ef4444'
+                            }}>
+                              {f.status === 'GERADA' ? '✅ Disponível para uso' : f.status === 'AGUARDANDO_DECISAO' ? '⏳ Em aprovação' : f.status}
+                            </span>
+                          </div>
+                          
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                            <div>
+                              <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Ciclo de Origem</div>
+                              <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text)' }}>{f.cycles?.nome || 'Ciclo legado'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Custo do Acúmulo</div>
+                              <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text)' }}>252h (21 Plantões)</div>
+                            </div>
+                          </div>
+
+                          <div style={{ height: '1px', background: 'var(--color-divider)', margin: '4px 0' }} />
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                              <strong>Período do Ciclo:</strong> {new Date(f.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(f.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                              <strong>Data da Concessão:</strong> {new Date(f.generated_at).toLocaleDateString('pt-BR')}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ABA: Plantões */}
+                  {detailTab === 'plantoes' && (
+                    <div>
+                      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
+                        Este painel detalha as horas contempladas dentro do ciclo atual do servidor. Cada carga horária lançada é somada ao saldo geral, acumulando o tempo exigido para a liberação da próxima folga.
+                      </div>
+                      {detailShifts.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhum plantão registrado.</div>
+                      ) : detailShifts.map((s: any) => {
+                        const workedTotalMinutes = (s.quantidade_plantoes * 720) + (s.minutos_residuais || 0);
+                        const workedHours = Math.floor(workedTotalMinutes / 60);
+                        const workedMinutes = workedTotalMinutes % 60;
+                        return (
+                        <div key={s.id} style={{
+                          padding: '16px', marginBottom: '12px', borderRadius: '8px',
+                          background: 'var(--color-bg)', border: '1px solid var(--color-divider)',
+                          display: 'flex', flexDirection: 'column', gap: '8px'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div style={{ fontWeight: 700, fontSize: '16px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>⏱️</span> Carga Horária Informada
+                            </div>
+                            <span style={{ fontWeight: 800, color: 'var(--color-primary)', fontSize: '20px' }}>
+                              {workedHours}h {String(workedMinutes).padStart(2, '0')}m
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                            <div>
+                              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Ciclo / Período</div>
+                              <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text)' }}>{s.cycles?.nome || 'Importação Base'}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{new Date(s.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(s.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Conversão de Acúmulo</div>
+                              <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text)' }}>+{s.quantidade_plantoes} Plantões Inteiros</div>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Saldo guardado (Sobra): {Math.floor((s.minutos_residuais || 0)/60)}h {String((s.minutos_residuais || 0)%60).padStart(2,'0')}m</div>
+                            </div>
+                          </div>
+
+                          {s.observacao && (
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: '4px', fontStyle: 'italic', marginTop: '4px' }}>
+                              {s.observacao}
+                            </div>
+                          )}
+                          
+                          <div style={{ height: '1px', background: 'var(--color-divider)', margin: '4px 0' }} />
+                          
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                            <strong>Data do Lançamento:</strong> {new Date(s.created_at).toLocaleDateString('pt-BR')}
+                          </div>
+                        </div>
+                      )})}
+                    </div>
+                  )}
+
+                  {/* ABA: Plantão Plus */}
+                  {detailTab === 'plus' && (
+                    <div>
+                      <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
+                        O Plantão Plus refere-se aos plantões remunerados realizados de forma suplementar, ou seja, turnos cumpridos pelo servidor que não fazem parte de sua escala obrigatória
+                      </div>
+                      {detailPlusRequests.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhum Plantão Plus lançado.</div>
+                      ) : detailPlusRequests.map(p => (
+                        <div key={p.id} style={{
+                          padding: '12px 14px', marginBottom: '8px', borderRadius: '8px',
+                          background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.15)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                            <div>
+                              <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--color-primary)' }}>⚡ Plantão Plus</div>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                Data trabalhada: <strong>{p.data_plantao ? new Date(p.data_plantao + 'T12:00:00Z').toLocaleDateString('pt-BR') : '-'}</strong>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontWeight: 700, fontSize: '14px' }}>R$ {Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                              <span style={{
+                                fontSize: '10px', padding: '2px 8px', borderRadius: '12px', fontWeight: 700, display: 'inline-block', marginTop: '4px',
+                                background: p.status === 'APROVADA' ? 'rgba(16,185,129,0.1)' : p.status === 'REJEITADA' ? 'rgba(239,68,68,0.1)' : 'rgba(234,179,8,0.1)',
+                                color: p.status === 'APROVADA' ? '#10b981' : p.status === 'REJEITADA' ? '#ef4444' : '#eab308'
+                              }}>
+                                {p.status === 'APROVADA' ? '✅ Aprovado' : p.status === 'REJEITADA' ? '❌ Rejeitado' : '⏳ Aguardando'}
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', borderTop: '1px solid rgba(59,130,246,0.1)', paddingTop: '8px' }}>
+                            <strong>Justificativa:</strong> {p.justificativa}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                            Solicitado em {new Date(p.requested_at).toLocaleDateString('pt-BR')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

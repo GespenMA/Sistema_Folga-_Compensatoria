@@ -65,7 +65,7 @@ BEGIN
     END LOOP;
     
     -- Verifica se o novo saldo acumulado atingiu ou passou de 21 plantões
-    v_folgas_to_generate := v_current_balance / 21; -- Divisão inteira (ex: 45 / 21 = 2)
+    v_folgas_to_generate := v_current_balance / 21; -- Divisão inteira (ex: 26 / 21 = 1)
     
     IF v_folgas_to_generate > 0 THEN
         -- Vamos precisar das informações do plantão mais recente para preencher os dados da folga
@@ -83,7 +83,7 @@ BEGIN
         v_current_balance := v_current_balance - (v_folgas_to_generate * 21);
     END IF;
     
-    -- Atualiza a tabela employees com o saldo que restou (entre 0 e 20)
+    -- Atualiza a tabela employees com o saldo que restou (entre 0 e 11)
     UPDATE employees SET saldo_plantoes = v_current_balance WHERE id = v_emp_id;
     
     RETURN NULL; -- Trigger AFTER não precisa retornar a ROW

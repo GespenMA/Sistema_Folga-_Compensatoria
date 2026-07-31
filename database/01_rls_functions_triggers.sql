@@ -154,30 +154,6 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_validar_solicitacao BEFORE INSERT OR UPDATE ON purchase_requests FOR EACH ROW EXECUTE FUNCTION validar_solicitacao_compra();
 
--- 2.3 Validar Conflito de Período na Geração da Folga
-CREATE OR REPLACE FUNCTION validar_periodo_folga() RETURNS TRIGGER AS $$
-DECLARE
-  v_conflitos INTEGER;
-BEGIN
-  IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
-    SELECT COUNT(*) INTO v_conflitos
-    FROM compensatory_days
-    WHERE employee_id = NEW.employee_id
-      AND id != NEW.id
-      AND status != 'CANCELADA'
-      AND (NEW.periodo_inicio <= periodo_fim AND NEW.periodo_fim >= periodo_inicio);
-      
-    IF v_conflitos > 0 THEN
-      RAISE EXCEPTION 'O período informado conflita com uma folga já existente para este servidor.';
-    END IF;
-  END IF;
-  
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_validar_periodo_folga BEFORE INSERT OR UPDATE ON compensatory_days FOR EACH ROW EXECUTE FUNCTION validar_periodo_folga();
-
 -- =====================================================================================
 -- 3. AUDITORIA (TRIGGER GENÉRICO)
 -- =====================================================================================

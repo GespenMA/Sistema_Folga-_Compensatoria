@@ -22,7 +22,9 @@ type Solicitacao = {
   status: string;
   justificativa: string;
   requested_at: string;
-  compensatory_days: {
+  tipo_solicitacao: string;
+  data_plantao?: string;
+  compensatory_days?: {
     periodo_inicio: string;
     periodo_fim: string;
     quantidade_plantoes: number;
@@ -45,23 +47,47 @@ export const Solicitacoes: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedFolga, setSelectedFolga] = useState<FolgaDisponivel | null>(null);
   const [justificativa, setJustificativa] = useState('');
+  const [dataPlantao, setDataPlantao] = useState('');
   const [valorUnitario, setValorUnitario] = useState(0);
   const [valorHistoricoId, setValorHistoricoId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Filtros para Folgas
+  const [buscaFolga, setBuscaFolga] = useState('');
+  const [filtroCargoFolga, setFiltroCargoFolga] = useState('');
+
   // Status de Limite
   const [totalOrcado, setTotalOrcado] = useState(0);
   const [totalGasto, setTotalGasto] = useState(0);
+  const [totalEmpenhado, setTotalEmpenhado] = useState(0);
   const [orcamentoDisponivel, setOrcamentoDisponivel] = useState(0);
+
+  // Valores dos Cargos (para mostrar no card antes do modal)
+  const [positionValues, setPositionValues] = useState<Record<string, number>>({});
+
+  // Aprovação em lote (Lado Direito)
+  const [selectedRequests, setSelectedRequests] = useState<string[]>([]);
+  
+  // Solicitação em lote (Lado Esquerdo)
+  const [selectedFolgas, setSelectedFolgas] = useState<string[]>([]);
+
+  // Paginação
+  const [currentPageFolgas, setCurrentPageFolgas] = useState(1);
+  const [currentPageSolicitacoes, setCurrentPageSolicitacoes] = useState(1);
+  const ITEMS_PER_PAGE = 24;
+
+  useEffect(() => {
+    setCurrentPageFolgas(1);
+  }, [buscaFolga, filtroCargoFolga]);
 
   useEffect(() => {
     if (profile?.establishment_id) {
-      fetchData();
+      fetchData(true);
     }
-  }, [profile]);
+  }, [profile?.establishment_id]);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       // 1. Pega o Ciclo Ativo
       const { data: cycleData } = await supabase
@@ -95,7 +121,7 @@ export const Solicitacoes: React.FC = () => {
         const { data: sols } = await supabase
           .from('purchase_requests')
           .select(`
-            id, valor, status, justificativa, requested_at,
+            id, valor, status, justificativa, requested_at, tipo_solicitacao, data_plantao,
             compensatory_days (periodo_inicio, periodo_fim, quantidade_plantoes),
             employees (nome, matricula, positions(codigo))
           `)
@@ -115,12 +141,31 @@ export const Solicitacoes: React.FC = () => {
 
         const orcado = ceData?.total_orcado || 0;
         const consumido = (sols || [])
-          .filter(s => s.status !== 'REJEITADA' && s.status !== 'CANCELADA')
+          .filter(s => s.status === 'APROVADA')
+          .reduce((acc, curr) => acc + Number(curr.valor), 0);
+
+        const empenhado = (sols || [])
+          .filter(s => s.status === 'SOLICITADA' || s.status === 'PENDENTE')
           .reduce((acc, curr) => acc + Number(curr.valor), 0);
           
         setTotalOrcado(orcado);
         setTotalGasto(consumido);
+        setTotalEmpenhado(empenhado);
         setOrcamentoDisponivel(orcado - consumido);
+
+        // 5. Busca valores atualizados dos cargos
+        const { data: posVals } = await supabase
+          .from('position_values')
+          .select('position_id, valor')
+          .order('vigencia_inicio', { ascending: false });
+        
+        if (posVals) {
+          const vals: Record<string, number> = {};
+          posVals.forEach(v => {
+            if (!vals[v.position_id]) vals[v.position_id] = v.valor;
+          });
+          setPositionValues(vals);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -132,6 +177,7 @@ export const Solicitacoes: React.FC = () => {
   const openCompraModal = async (folga: FolgaDisponivel) => {
     setSelectedFolga(folga);
     setJustificativa('');
+    setDataPlantao('');
     
     // Buscar o valor atual do cargo para calcular
     const positionId = folga.employees.positions.id;
@@ -160,14 +206,32 @@ export const Solicitacoes: React.FC = () => {
     
     const valorTotal = valorUnitario * selectedFolga.quantidade_plantoes;
 
-    // Trava de orçamento frontend
-    if (valorTotal > orcamentoDisponivel) {
-      alert(`Orçamento insuficiente! O valor solicitado (R$ ${valorTotal.toFixed(2)}) ultrapassa o saldo disponível (R$ ${orcamentoDisponivel.toFixed(2)}).`);
+    // Antiga trava de orçamento (removida): o frontend não bloqueia a CRIAÇÃO da solicitação (Fila). 
+    // O bloqueio real de limite de orçamento ocorre no Banco de Dados (Trigger) no momento da APROVAÇÃO.
+
+    if (dataPlantao > activeCycle.data_fim) {
+      alert(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`);
       return;
     }
 
     setIsSubmitting(true);
     try {
+      // Verificar duplicidade de data
+      const { data: existingPlus } = await supabase
+        .from('purchase_requests')
+        .select('id')
+        .eq('employee_id', selectedFolga.employees.id)
+        .eq('data_plantao', dataPlantao)
+        .neq('status', 'REJEITADA')
+        .neq('status', 'CANCELADA')
+        .limit(1);
+
+      if (existingPlus && existingPlus.length > 0) {
+        alert('Este servidor já possui uma solicitação ou compra de plantão para esta mesma data.');
+        setIsSubmitting(false);
+        return;
+      }
+
       // 1. Criar ou Atualizar purchase_request (evita erro 409 de unique constraint)
       const { error: reqError } = await supabase
         .from('purchase_requests')
@@ -180,6 +244,7 @@ export const Solicitacoes: React.FC = () => {
           valor: valorTotal,
           valor_historico_id: valorHistoricoId,
           justificativa: justificativa,
+          data_plantao: dataPlantao,
           status: 'SOLICITADA',
           requested_by: profile.id,
           analyzed_by: null,
@@ -201,12 +266,111 @@ export const Solicitacoes: React.FC = () => {
       if (updError) throw updError;
 
       setIsModalOpen(false);
-      fetchData(); // Recarrega tudo para atualizar saldos e tabelas
+      fetchData(false); // Recarrega tudo para atualizar saldos e tabelas, sem loading na tela toda
     } catch (err: any) {
       alert(err.message || "Erro ao solicitar compra da folga.");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const openBulkCompraModal = () => {
+    if (selectedFolgas.length === 0) return;
+    setSelectedFolga(null);
+    setJustificativa('');
+    setDataPlantao('');
+    setIsModalOpen(true);
+  };
+
+  const handleBulkComprarForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedFolgas.length === 0 || !profile || !activeCycle || !dataPlantao) return;
+    
+    if (dataPlantao > activeCycle.data_fim) {
+      alert(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`);
+      return;
+    }
+
+    if (justificativa.length < 50) {
+      alert("A justificativa precisa ter pelo menos 50 caracteres.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    let erroredCount = 0;
+    
+    const folgasToBuy = folgasDisponiveis.filter(f => selectedFolgas.includes(f.id));
+
+    for (const folga of folgasToBuy) {
+      try {
+        const positionId = folga.employees.positions.id;
+
+        // Verificação de duplicidade da data
+        const { data: existingPlus } = await supabase
+          .from('purchase_requests')
+          .select('id')
+          .eq('employee_id', folga.employees.id)
+          .eq('data_plantao', dataPlantao)
+          .neq('status', 'REJEITADA')
+          .neq('status', 'CANCELADA')
+          .limit(1);
+
+        if (existingPlus && existingPlus.length > 0) {
+           console.error(`Servidor ${folga.employees.nome} já possui compra para o dia ${dataPlantao}.`);
+           erroredCount++;
+           continue;
+        }
+
+        const { data: posVal } = await supabase
+          .from('position_values')
+          .select('id, valor')
+          .eq('position_id', positionId)
+          .order('vigencia_inicio', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!posVal) throw new Error("Cargo sem valor configurado");
+
+        const valorUnitario = posVal.valor;
+        const valorTotalFolga = valorUnitario * folga.quantidade_plantoes;
+
+        const { error: reqError } = await supabase
+          .from('purchase_requests')
+          .upsert([{
+            compensatory_day_id: folga.id,
+            establishment_id: profile.establishment_id,
+            cycle_id: activeCycle.id,
+            employee_id: folga.employees.id,
+            position_id: folga.employees.positions.id,
+            valor: valorTotalFolga,
+            valor_historico_id: posVal.id,
+            justificativa: justificativa,
+            data_plantao: dataPlantao,
+            status: 'SOLICITADA',
+            requested_by: profile.id
+          }], { onConflict: 'compensatory_day_id' });
+
+        if (reqError) throw reqError;
+
+        const { error: updError } = await supabase
+          .from('compensatory_days')
+          .update({ status: 'AGUARDANDO_DECISAO' })
+          .eq('id', folga.id);
+
+        if (updError) throw updError;
+      } catch (err) {
+        console.error(err);
+        erroredCount++;
+      }
+    }
+
+    setIsSubmitting(false);
+    setIsModalOpen(false);
+    setSelectedFolgas([]);
+    if (erroredCount > 0) {
+      alert(`Ocorreu um erro ou bloqueio de duplicidade em ${erroredCount} folga(s). As demais foram solicitadas com sucesso.`);
+    }
+    fetchData(false);
   };
 
   const handleCancelRequest = async (solicitacao: Solicitacao) => {
@@ -235,7 +399,7 @@ export const Solicitacoes: React.FC = () => {
       // Precisamos do compensatory_day_id. Como a query original não trouxe o ID, vamos buscar.
       const { data: reqData } = await supabase.from('purchase_requests').select('compensatory_day_id').eq('id', solicitacao.id).single();
       
-      if (reqData) {
+      if (reqData && reqData.compensatory_day_id) {
         const { error: updError } = await supabase
           .from('compensatory_days')
           .update({ status: 'GERADA' })
@@ -244,10 +408,58 @@ export const Solicitacoes: React.FC = () => {
         if (updError) throw updError;
       }
 
-      fetchData(); // Recarrega tudo
+      fetchData(false); // Recarrega tudo
     } catch (err: any) {
       alert(err.message || "Erro ao cancelar solicitação.");
     }
+  };
+
+  const handleBulkApprove = async () => {
+    if (selectedRequests.length === 0) return;
+    if (!window.confirm(`Tem certeza que deseja APROVAR as ${selectedRequests.length} solicitações selecionadas? O valor será debitado do orçamento permanentemente.`)) return;
+    
+    setIsSubmitting(true);
+    let errorCount = 0;
+    
+    for (const id of selectedRequests) {
+      try {
+        const { error: reqError } = await supabase
+          .from('purchase_requests')
+          .update({ 
+            status: 'APROVADA',
+            analyzed_by: profile?.id,
+            analyzed_at: new Date().toISOString()
+          })
+          .eq('id', id);
+  
+        if (reqError) throw reqError;
+  
+        const { data: reqData } = await supabase.from('purchase_requests').select('compensatory_day_id').eq('id', id).single();
+        if (reqData && reqData.compensatory_day_id) {
+          const { error: updError } = await supabase
+            .from('compensatory_days')
+            .update({ status: 'COMPRADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
+            .eq('id', reqData.compensatory_day_id);
+          if (updError) throw updError;
+        }
+      } catch (err: any) {
+        if (err.message?.includes('ORCAMENTO_EXCEDIDO')) {
+          alert(err.message.replace('ORCAMENTO_EXCEDIDO: ', '🚫 BLOQUEIO DO SISTEMA (Orçamento Excedido):\n\n') + `\n\n(Parando a aprovação em lote nas demais solicitações)`);
+          break; // Stop bulk processing if budget exceeded
+        } else {
+          console.error(err);
+          errorCount++;
+        }
+      }
+    }
+    
+    if (errorCount > 0) {
+      alert(`Houve erro ao aprovar ${errorCount} solicitação(ões). As demais foram processadas.`);
+    }
+    
+    setSelectedRequests([]);
+    setIsSubmitting(false);
+    fetchData(false);
   };
 
   const handleApproveRequest = async (solicitacao: Solicitacao) => {
@@ -265,14 +477,14 @@ export const Solicitacoes: React.FC = () => {
       if (reqError) throw reqError;
 
       const { data: reqData } = await supabase.from('purchase_requests').select('compensatory_day_id').eq('id', solicitacao.id).single();
-      if (reqData) {
+      if (reqData && reqData.compensatory_day_id) {
         const { error: updError } = await supabase
           .from('compensatory_days')
           .update({ status: 'COMPRADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
           .eq('id', reqData.compensatory_day_id);
         if (updError) throw updError;
       }
-      fetchData();
+      fetchData(false);
     } catch (err: any) {
       if (err.message?.includes('ORCAMENTO_EXCEDIDO')) {
         alert(err.message.replace('ORCAMENTO_EXCEDIDO: ', '🚫 BLOQUEIO DO SISTEMA:\n\n'));
@@ -300,14 +512,14 @@ export const Solicitacoes: React.FC = () => {
       if (reqError) throw reqError;
 
       const { data: reqData } = await supabase.from('purchase_requests').select('compensatory_day_id').eq('id', solicitacao.id).single();
-      if (reqData) {
+      if (reqData && reqData.compensatory_day_id) {
         const { error: updError } = await supabase
           .from('compensatory_days')
           .update({ status: 'GERADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
           .eq('id', reqData.compensatory_day_id);
         if (updError) throw updError;
       }
-      fetchData();
+      fetchData(false);
     } catch (err: any) {
       alert(err.message || "Erro ao rejeitar.");
     }
@@ -351,9 +563,13 @@ export const Solicitacoes: React.FC = () => {
                <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>Total Orçado</div>
                <div style={{ fontWeight: 600 }}>R$ {totalOrcado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
              </div>
-             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid var(--color-divider)', paddingBottom: '8px' }}>
-               <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>Total Gasto</div>
+             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+               <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>Total Aprovado (Gasto)</div>
                <div style={{ fontWeight: 600 }}>R$ {totalGasto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+             </div>
+             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', borderBottom: '1px solid var(--color-divider)', paddingBottom: '8px' }}>
+               <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>Aguardando Aprovação</div>
+               <div style={{ fontWeight: 600, color: '#f59e0b' }}>R$ {totalEmpenhado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
              </div>
              <h4 style={{ margin: '0 0 var(--space-2) 0' }}>Orçamento Disponível</h4>
              <div style={{ fontSize: '24px', fontWeight: 700, color: orcamentoDisponivel > 0 ? '#10b981' : '#ef4444' }}>
@@ -361,41 +577,182 @@ export const Solicitacoes: React.FC = () => {
              </div>
           </div>
 
-          <h3 style={{ marginBottom: 'var(--space-3)' }}>Folgas Disponíveis para Compra</h3>
-          {folgasDisponiveis.length === 0 ? (
-            <div className="blueprint card" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-              Nenhuma folga nova gerada neste ciclo. Vá na tela de "Banco de Folgas" para lançar os plantões.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-              {folgasDisponiveis.map(f => (
-                <div key={f.id} className="blueprint card" style={{ padding: 'var(--space-3)' }}>
-                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                     <div>
-                       <strong>{f.employees.nome}</strong>
-                       <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                         {f.employees.positions.codigo} | {f.quantidade_plantoes} plantões
-                       </div>
-                     </div>
-                     <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={() => openCompraModal(f)}>
-                       Solicitar Compra
-                     </button>
-                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+            <h3 style={{ margin: 0 }}>Folgas Disponíveis para Compra</h3>
+            {selectedFolgas.length > 0 && (
+              <button 
+                className="btn btn-primary" 
+                onClick={openBulkCompraModal} 
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Solicitando...' : `Solicitar Selecionadas (${selectedFolgas.length})`}
+              </button>
+            )}
+          </div>
+          
+          {(() => {
+            const cargosFolga = Array.from(
+              new Map(folgasDisponiveis.map(f => [f.employees.positions.id, f.employees.positions])).values()
+            ).sort((a, b) => a.nome.localeCompare(b.nome));
+
+            const folgasFiltradas = folgasDisponiveis
+              .filter(f => 
+                ((f.employees.nome || '').toLowerCase().includes(buscaFolga.toLowerCase()) ||
+                (f.employees.matricula || '').includes(buscaFolga)) &&
+                (filtroCargoFolga === '' || f.employees.positions.id === filtroCargoFolga)
+              )
+              .sort((a, b) => (a.employees.nome || '').localeCompare(b.employees.nome || ''));
+
+            const totalPagesFolgas = Math.ceil(folgasFiltradas.length / ITEMS_PER_PAGE);
+            const paginatedFolgas = folgasFiltradas.slice((currentPageFolgas - 1) * ITEMS_PER_PAGE, currentPageFolgas * ITEMS_PER_PAGE);
+
+            return (
+              <>
+                {folgasDisponiveis.length > 0 && (
+                  <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
+                    <div style={{ marginRight: '8px', display: 'flex', alignItems: 'center' }}>
+                      <input 
+                        type="checkbox"
+                        checked={paginatedFolgas.length > 0 && selectedFolgas.length >= paginatedFolgas.length && paginatedFolgas.every(f => selectedFolgas.includes(f.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            const newSelection = [...selectedFolgas];
+                            paginatedFolgas.forEach(f => {
+                              if (!newSelection.includes(f.id)) newSelection.push(f.id);
+                            });
+                            setSelectedFolgas(newSelection);
+                          } else {
+                            setSelectedFolgas(selectedFolgas.filter(id => !paginatedFolgas.some(f => f.id === id)));
+                          }
+                        }}
+                        title="Selecionar folgas desta página"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="🔍 Buscar por nome ou matrícula..."
+                      value={buscaFolga}
+                      onChange={e => setBuscaFolga(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <select
+                      className="input"
+                      style={{ width: '200px' }}
+                      value={filtroCargoFolga}
+                      onChange={e => setFiltroCargoFolga(e.target.value)}
+                    >
+                      <option value="">Todos os cargos</option>
+                      {cargosFolga.map(c => (
+                        <option key={c.id} value={c.id}>{c.nome}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {folgasDisponiveis.length === 0 ? (
+                  <div className="blueprint card" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                    Nenhuma folga nova gerada neste ciclo. Vá na tela de "Banco de Folgas" para lançar os plantões.
+                  </div>
+                ) : folgasFiltradas.length === 0 ? (
+                  <div className="blueprint card" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                    Nenhuma folga encontrada para os filtros aplicados.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+                    {paginatedFolgas.map(f => (
+                  <div key={f.id} className="blueprint card" style={{ padding: 'var(--space-3)', border: selectedFolgas.includes(f.id) ? '1px solid var(--color-primary)' : '' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedFolgas.includes(f.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedFolgas(prev => [...prev, f.id]);
+                            } else {
+                              setSelectedFolgas(prev => prev.filter(id => id !== f.id));
+                            }
+                          }}
+                        />
+                        <div>
+                          <strong>{f.employees.nome}</strong>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                            {f.employees.positions.codigo} | {f.quantidade_plantoes} plantões
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                        <strong style={{ color: 'var(--color-text)', fontSize: '15px' }}>
+                          R$ {((positionValues[f.employees.positions.id] || 0) * f.quantidade_plantoes).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </strong>
+                        <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={() => openCompraModal(f)}>
+                          Solicitar Compra
+                        </button>
+                      </div>
+                    </div>
+                 </div>
+                    ))}
+
+                    {totalPagesFolgas > 1 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-3) 0', borderTop: '1px solid var(--color-divider)' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                          Mostrando {(currentPageFolgas - 1) * ITEMS_PER_PAGE + 1} até {Math.min(currentPageFolgas * ITEMS_PER_PAGE, folgasFiltradas.length)} de {folgasFiltradas.length} folgas
+                        </span>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPageFolgas === 1} onClick={() => setCurrentPageFolgas(p => p - 1)}>
+                            Anterior
+                          </button>
+                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPageFolgas === totalPagesFolgas} onClick={() => setCurrentPageFolgas(p => p + 1)}>
+                            Próxima
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
-        {/* Lado Direito: Solicitações Realizadas */}
-        <div>
-          <h3 style={{ marginBottom: 'var(--space-3)' }}>Solicitações do Ciclo</h3>
+        {(() => {
+          const totalPagesSolicitacoes = Math.ceil(solicitacoes.length / ITEMS_PER_PAGE);
+          const paginatedSolicitacoes = solicitacoes.slice((currentPageSolicitacoes - 1) * ITEMS_PER_PAGE, currentPageSolicitacoes * ITEMS_PER_PAGE);
+
+          return (
+            <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+            <h3 style={{ margin: 0 }}>Solicitações do Ciclo</h3>
+            {selectedRequests.length > 0 && (
+              <button 
+                className="btn btn-primary" 
+                onClick={handleBulkApprove} 
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Aprovando...' : `Aprovar Selecionadas (${selectedRequests.length})`}
+              </button>
+            )}
+          </div>
           <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                  <th style={{ padding: 'var(--space-3)', width: '40px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={solicitacoes.filter(s => s.status === 'SOLICITADA').length > 0 && selectedRequests.length === solicitacoes.filter(s => s.status === 'SOLICITADA').length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedRequests(solicitacoes.filter(s => s.status === 'SOLICITADA').map(s => s.id));
+                        } else {
+                          setSelectedRequests([]);
+                        }
+                      }}
+                    />
+                  </th>
                   <th style={{ padding: 'var(--space-3)' }}>Servidor</th>
-                  <th style={{ padding: 'var(--space-3)' }}>Qtd. Folgas</th>
+                  <th style={{ padding: 'var(--space-3)' }}>Tipo / Qtd.</th>
                   <th style={{ padding: 'var(--space-3)' }}>Valor Solicitado</th>
                   <th style={{ padding: 'var(--space-3)' }}>Status</th>
                   <th style={{ padding: 'var(--space-3)', textAlign: 'right' }}>Ações</th>
@@ -404,17 +761,45 @@ export const Solicitacoes: React.FC = () => {
               <tbody>
                 {solicitacoes.length === 0 ? (
                   <tr>
-                    <td colSpan={4} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                    <td colSpan={6} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                       Nenhuma solicitação de compra feita neste ciclo.
                     </td>
                   </tr>
-                ) : solicitacoes.map(sol => (
+                ) : paginatedSolicitacoes.map(sol => (
                   <tr key={sol.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                    <td style={{ padding: 'var(--space-3)' }}>
+                      {sol.status === 'SOLICITADA' && (
+                        <input 
+                          type="checkbox" 
+                          checked={selectedRequests.includes(sol.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedRequests(prev => [...prev, sol.id]);
+                            } else {
+                              setSelectedRequests(prev => prev.filter(id => id !== sol.id));
+                            }
+                          }}
+                        />
+                      )}
+                    </td>
                     <td style={{ padding: 'var(--space-3)' }}>
                       <div style={{ fontWeight: 500 }}>{sol.employees?.nome}</div>
                       <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{sol.employees?.positions?.codigo}</div>
                     </td>
-                    <td style={{ padding: 'var(--space-3)' }}>{sol.compensatory_days?.quantidade_plantoes}</td>
+                    <td style={{ padding: 'var(--space-3)' }}>
+                      {sol.tipo_solicitacao === 'PLANTAO_PLUS' ? (
+                        <div>
+                          <span style={{ fontSize: '11px', background: 'var(--color-primary)', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>
+                            PL. PLUS
+                          </span>
+                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                            {sol.data_plantao ? new Date(sol.data_plantao + 'T12:00:00Z').toLocaleDateString('pt-BR') : ''}
+                          </div>
+                        </div>
+                      ) : (
+                        sol.compensatory_days?.quantidade_plantoes + ' folga(s)'
+                      )}
+                    </td>
                     <td style={{ padding: 'var(--space-3)', fontWeight: 600 }}>R$ {Number(sol.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                     <td style={{ padding: 'var(--space-3)' }}>{getStatusBadge(sol.status)}</td>
                     <td style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
@@ -440,12 +825,30 @@ export const Solicitacoes: React.FC = () => {
                 ))}
               </tbody>
             </table>
+
+            {totalPagesSolicitacoes > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-3) var(--space-4)', borderTop: '1px solid var(--color-divider)' }}>
+                <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                  Mostrando {(currentPageSolicitacoes - 1) * ITEMS_PER_PAGE + 1} até {Math.min(currentPageSolicitacoes * ITEMS_PER_PAGE, solicitacoes.length)} de {solicitacoes.length} solicitações
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPageSolicitacoes === 1} onClick={() => setCurrentPageSolicitacoes(p => p - 1)}>
+                    Anterior
+                  </button>
+                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPageSolicitacoes === totalPagesSolicitacoes} onClick={() => setCurrentPageSolicitacoes(p => p + 1)}>
+                    Próxima
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
+      );
+      })()}
       </div>
 
       {/* Modal de Compra */}
-      {isModalOpen && selectedFolga && (
+      {isModalOpen && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
           background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
@@ -453,22 +856,44 @@ export const Solicitacoes: React.FC = () => {
           <div className="blueprint card elev-md" style={{ width: '500px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
             <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>Solicitar Compra de Folga</h3>
             
-            <div style={{ background: 'var(--color-bg)', padding: 'var(--space-3)', borderRadius: '4px', marginBottom: 'var(--space-4)' }}>
-              <div><strong>Servidor:</strong> {selectedFolga.employees.nome}</div>
-              <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Quantidade: <strong>{selectedFolga.quantidade_plantoes}</strong></span>
-                <span>Valor Base: <strong>R$ {valorUnitario.toFixed(2)}</strong></span>
+            {selectedFolga ? (
+              <div style={{ background: 'var(--color-bg)', padding: 'var(--space-3)', borderRadius: '4px', marginBottom: 'var(--space-4)' }}>
+                <div><strong>Servidor:</strong> {selectedFolga.employees.nome}</div>
+                <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Quantidade: <strong>{selectedFolga.quantidade_plantoes}</strong></span>
+                  <span>Valor Base: <strong>R$ {valorUnitario.toFixed(2)}</strong></span>
+                </div>
+                <hr style={{ borderTop: '1px dashed var(--color-divider)', margin: '12px 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 'bold' }}>
+                  <span>Valor Total Solicitado:</span>
+                  <span style={{ color: 'var(--color-primary)' }}>
+                    R$ {(valorUnitario * selectedFolga.quantidade_plantoes).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
               </div>
-              <hr style={{ borderTop: '1px dashed var(--color-divider)', margin: '12px 0' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 'bold' }}>
-                <span>Valor Total Solicitado:</span>
-                <span style={{ color: 'var(--color-primary)' }}>
-                  R$ {(valorUnitario * selectedFolga.quantidade_plantoes).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </span>
+            ) : (
+              <div style={{ background: 'var(--color-bg)', padding: 'var(--space-3)', borderRadius: '4px', marginBottom: 'var(--space-4)' }}>
+                <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>Solicitação em Lote</div>
+                <div><strong>Folgas Selecionadas:</strong> {selectedFolgas.length}</div>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                  O mesmo motivo e data de plantão serão aplicados para todas as folgas.
+                </div>
               </div>
-            </div>
+            )}
 
-            <form onSubmit={handleComprar}>
+            <form onSubmit={selectedFolga ? handleComprar : handleBulkComprarForm}>
+              <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
+                <label>Informe a data efetiva em que o servidor prestou o plantão que está sendo comprado. *</label>
+                <input 
+                  type="date"
+                  className="input"
+                  required
+                  value={dataPlantao}
+                  onChange={e => setDataPlantao(e.target.value)}
+                  max={activeCycle.data_fim}
+                />
+              </div>
+
               <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
                 <label>Justificativa Administrativa (Mínimo 50 caracteres) *</label>
                 <textarea 

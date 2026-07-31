@@ -138,6 +138,8 @@ CREATE TABLE compensatory_days (
 -- 2.11 Purchase Requests
 CREATE TABLE purchase_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tipo_solicitacao VARCHAR(30) DEFAULT 'FOLGA_COMPENSATORIA' CHECK (tipo_solicitacao IN ('FOLGA_COMPENSATORIA', 'PLANTAO_PLUS')),
+    data_plantao DATE,
     compensatory_day_id UUID REFERENCES compensatory_days(id) ON DELETE CASCADE UNIQUE,
     establishment_id UUID REFERENCES establishments(id) ON DELETE RESTRICT,
     cycle_id UUID REFERENCES cycles(id) ON DELETE RESTRICT,

@@ -49,7 +49,7 @@ export const Configuracoes: React.FC = () => {
   // =============================================
   // Estados para Importação Mensal
   // =============================================
-  type PreviewRow = { matricula: string; nome: string; cargo: string; estabelecimento: string; trabalhadas: string; minutosNovos: number; plantoes: number; minutosResiduo: number; erros: string[] };
+  type PreviewRow = { matricula: string; nome: string; cargo: string; dataAdmissao: string; estabelecimento: string; trabalhadas: string; minutosNovos: number; plantoes: number; minutosResiduo: number; erros: string[] };
   type ImportResult = { importados: number; atualizados: number; shiftsInseridos: number; erros: string[] };
 
   const [activeCycleForImport, setActiveCycleForImport] = useState<{ id: string; nome: string; data_inicio: string; data_fim: string } | null>(null);
@@ -89,8 +89,15 @@ export const Configuracoes: React.FC = () => {
   };
 
   // Converte "HH:MM" para minutos totais
-  const parseHorasMinutos = (str: string): number => {
+  const parseHorasMinutos = (str: string | number): number => {
     if (!str) return 0;
+    
+    // Se for um número (ou string numérica sem ':'), o Excel enviou como fração de dias
+    if (!String(str).includes(':') && !isNaN(Number(str))) {
+      const days = parseFloat(String(str));
+      return Math.round(days * 24 * 60);
+    }
+    
     const parts = String(str).trim().split(':');
     if (parts.length < 2) return 0;
     return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
@@ -320,22 +327,37 @@ export const Configuracoes: React.FC = () => {
       // rows[0] é o cabeçalho
       const MINUTOS_POR_PLANTAO = 720; // 12h
       const preview: PreviewRow[] = rows.slice(1).filter(r => r[0]).map(r => {
-        const trabalhadas = String(r[4] || '0:00');
-        const minutosNovos = parseHorasMinutos(trabalhadas);
+        const rawTrabalhadas = r[5] !== undefined ? r[5] : '0:00';
+        const trabalhadas = String(rawTrabalhadas);
+        const minutosNovos = parseHorasMinutos(rawTrabalhadas);
         // O preview mostra o cálculo só das horas novas (sem saldo anterior)
         // O saldo anterior é buscado individualmente na confirmação
         const plantoes = Math.floor(minutosNovos / MINUTOS_POR_PLANTAO);
         const minutosResiduo = minutosNovos % MINUTOS_POR_PLANTAO;
+        
+        let dataAdmissao = activeCycleForImport?.data_inicio || new Date().toISOString().split('T')[0];
+        if (r[3]) {
+          if (typeof r[3] === 'number') {
+            const date = new Date(Math.round((r[3] - 25569) * 86400 * 1000));
+            dataAdmissao = date.toISOString().split('T')[0];
+          } else if (typeof r[3] === 'string') {
+            const parts = r[3].split('/');
+            if (parts.length === 3) dataAdmissao = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            else dataAdmissao = r[3];
+          }
+        }
+
         const erros: string[] = [];
         if (!r[0]) erros.push('Matrícula vazia');
         if (!r[1]) erros.push('Nome vazio');
         if (!r[2]) erros.push('Cargo vazio');
-        if (!r[3]) erros.push('Estabelecimento vazio');
+        if (!r[4]) erros.push('Estabelecimento vazio');
         return {
           matricula: String(r[0] || ''),
           nome: String(r[1] || ''),
           cargo: String(r[2] || ''),
-          estabelecimento: String(r[3] || ''),
+          dataAdmissao,
+          estabelecimento: String(r[4] || ''),
           trabalhadas,
           minutosNovos,
           plantoes,
@@ -455,7 +477,7 @@ export const Configuracoes: React.FC = () => {
               nome: row.nome,
               position_id: posId,
               ativo: true,
-              data_admissao: activeCycleForImport.data_inicio,
+              data_admissao: row.dataAdmissao,
               saldo_minutos: novoSaldoMinutos
             },
             { onConflict: 'establishment_id,matricula', ignoreDuplicates: false }
@@ -656,7 +678,7 @@ export const Configuracoes: React.FC = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     <div style={{ fontSize: '14px', color: 'var(--color-text)' }}>
                       <strong>Guía esperada:</strong> <code>Base_Geral</code> &nbsp;| 
-                      <strong>Colunas:</strong> Matrícula, Funcionário, Cargo, Estabelecimento penal, Trabalhadas
+                      <strong>Colunas:</strong> Matrícula, Funcionário, Cargo, Data admissão, Estabelecimento penal, Trabalhadas
                     </div>
                     <div>
                       <label className="btn btn-primary" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
