@@ -443,22 +443,28 @@ export const Configuracoes: React.FC = () => {
         let saldoMinutosBase = existingEmp?.saldo_minutos ?? 0;
 
         // -----------------------------------------------------------------------
-        // 2. SE É SOBRESCRITA: reverter o saldo_minutos do ciclo anterior
+        // 2. SE É SOBRESCRITA: reverter o saldo_minutos de TODOS os shifts
+        //    anteriores deste servidor neste ciclo (pode haver duplicatas)
         // -----------------------------------------------------------------------
         if (forceOverwrite && existingEmp) {
-          // Buscar o shift anterior deste servidor neste ciclo (se existir)
-          const { data: oldShift } = await supabase
+          // Buscar TODOS os shifts deste servidor neste ciclo (não apenas um)
+          const { data: oldShifts } = await supabase
             .from('shifts')
             .select('id, minutos_residuais')
             .eq('employee_id', existingEmp.id)
-            .eq('cycle_id', activeCycleForImport.id)
-            .maybeSingle();
+            .eq('cycle_id', activeCycleForImport.id);
 
-          if (oldShift) {
-            // Reverter: saldo antes deste ciclo = saldo_atual - minutos_residuais_deste_ciclo
-            saldoMinutosBase = Math.max(0, saldoMinutosBase - (oldShift.minutos_residuais ?? 0));
-            // Deletar o shift antigo (trigger do banco recalcula saldo_plantoes)
-            await supabase.from('shifts').delete().eq('id', oldShift.id);
+          if (oldShifts && oldShifts.length > 0) {
+            // Somar os minutos residuais de todos os shifts anteriores
+            const totalResiduaisAntigos = oldShifts.reduce(
+              (acc: number, s: any) => acc + (s.minutos_residuais ?? 0),
+              0
+            );
+            // Reverter: saldo antes deste ciclo = saldo_atual - soma dos residuais antigos
+            saldoMinutosBase = Math.max(0, saldoMinutosBase - totalResiduaisAntigos);
+            // Deletar TODOS os shifts antigos de uma vez
+            const oldIds = oldShifts.map((s: any) => s.id);
+            await supabase.from('shifts').delete().in('id', oldIds);
           }
         }
 
@@ -491,7 +497,7 @@ export const Configuracoes: React.FC = () => {
         if (!existingEmp) importados++;
         else atualizados++;
 
-        // Inserir shift com minutos_residuais registrado (para futura reversão)
+        // Inserir shift — seguro pois os shifts antigos foram deletados acima
         if (plantoesTotal > 0) {
           const { error: shiftErr } = await supabase.from('shifts').insert({
             employee_id: empId,

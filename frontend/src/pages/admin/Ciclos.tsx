@@ -18,6 +18,10 @@ export const Ciclos: React.FC = () => {
   const [ciclos, setCiclos] = useState<Cycle[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Filtros
+  const [filterMes, setFilterMes] = useState<string>('');
+  const [filterAno, setFilterAno] = useState<string>('');
+
   // Modal Novo/Editar Ciclo
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -52,10 +56,12 @@ export const Ciclos: React.FC = () => {
   const fetchCiclos = async () => {
     setLoading(true);
     try {
+      // Ordenação cronológica crescente (Julho antes de Agosto)
       const { data, error } = await supabase
         .from('cycles')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('ano', { ascending: true })
+        .order('mes', { ascending: true });
 
       if (error) throw error;
       if (data) setCiclos(data as Cycle[]);
@@ -65,6 +71,25 @@ export const Ciclos: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const getMonthName = (monthNum: number) => {
+    const months = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+    return months[monthNum - 1] || '';
+  };
+
+  // Extrair meses e anos únicos EXISTENTES no banco
+  const uniqueMonths = Array.from(new Set(ciclos.map(c => c.mes))).sort((a, b) => a - b);
+  const uniqueYears = Array.from(new Set(ciclos.map(c => c.ano))).sort((a, b) => a - b);
+
+  // Filtragem em memória
+  const filteredCiclos = ciclos.filter(ciclo => {
+    const matchesMes = filterMes ? ciclo.mes === parseInt(filterMes) : true;
+    const matchesAno = filterAno ? ciclo.ano === parseInt(filterAno) : true;
+    return matchesMes && matchesAno;
+  });
 
   const openModal = (ciclo?: Cycle) => {
     if (ciclo) {
@@ -91,7 +116,6 @@ export const Ciclos: React.FC = () => {
     e.preventDefault();
     setIsSubmitting(true);
 
-    // Validação de Conflito de Datas (Overlap)
     const startTime = new Date(dataInicio + 'T12:00:00Z').getTime();
     const endTime = new Date(dataFim + 'T12:00:00Z').getTime();
 
@@ -121,14 +145,7 @@ export const Ciclos: React.FC = () => {
         if (error) throw error;
       } else {
         const { error } = await supabase.from('cycles').insert([
-          {
-            nome,
-            mes,
-            ano,
-            data_inicio: dataInicio,
-            data_fim: dataFim,
-            status: 'RASCUNHO'
-          }
+          { nome, mes, ano, data_inicio: dataInicio, data_fim: dataFim, status: 'RASCUNHO' }
         ]);
         if (error) throw error;
       }
@@ -309,7 +326,7 @@ export const Ciclos: React.FC = () => {
 
   const getStatusTag = (status: string) => {
     switch(status) {
-      case 'RASCUNHO': return <span className="tag" style={{ background: '#4b5563', color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>RASCUNHO</span>;
+      case 'RASCUNHO': return <span className="tag" style={{ background: '#475569', color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>RASCUNHO</span>;
       case 'ABERTO': return <span className="tag" style={{ background: '#059669', color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>ABERTO</span>;
       case 'FECHADO': return <span className="tag" style={{ background: '#dc2626', color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>FECHADO</span>;
       case 'REABERTO': return <span className="tag" style={{ background: '#d97706', color: 'white', fontWeight: 600, letterSpacing: '0.5px' }}>REABERTO</span>;
@@ -332,13 +349,90 @@ export const Ciclos: React.FC = () => {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--space-5)' }}>
+      {/* Filtros horizontais limpos e alinhados */}
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        gap: '16px', 
+        marginBottom: '24px', 
+        padding: '16px', 
+        background: '#ffffff',
+        border: '1px solid #cbd5e1',
+        borderRadius: '6px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        width: '100%'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#475569' }}>
+          <span style={{ fontSize: '18px' }}>🔍</span>
+          <span style={{ fontWeight: 600, fontSize: '14px' }}>Filtrar Ciclos:</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <select 
+            className="input" 
+            value={filterMes} 
+            onChange={e => setFilterMes(e.target.value)} 
+            style={{ 
+              minWidth: '200px', 
+              height: '38px',
+              padding: '0 12px',
+              background: '#f8fafc', 
+              borderColor: '#cbd5e1',
+              borderRadius: '6px',
+              fontSize: '14px'
+            }}
+          >
+            <option value="">Todos os Meses</option>
+            {uniqueMonths.map(m => (
+              <option key={m} value={m}>
+                {m.toString().padStart(2, '0')} - {getMonthName(m).toUpperCase()}
+              </option>
+            ))}
+          </select>
+
+          <select 
+            className="input" 
+            value={filterAno} 
+            onChange={e => setFilterAno(e.target.value)} 
+            style={{ 
+              minWidth: '140px', 
+              height: '38px',
+              padding: '0 12px',
+              background: '#f8fafc', 
+              borderColor: '#cbd5e1',
+              borderRadius: '6px',
+              fontSize: '14px'
+            }}
+          >
+            <option value="">Todos os Anos</option>
+            {uniqueYears.map(a => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
+
+          {(filterMes || filterAno) && (
+            <button 
+              className="btn btn-ghost" 
+              onClick={() => { setFilterMes(''); setFilterAno(''); }}
+              style={{ fontSize: '13px', color: '#ef4444', fontWeight: 600, cursor: 'pointer', padding: '0 8px' }}
+            >
+              Limpar Filtros
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Grid de Cards com Espaçamento Correto (24px) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '24px' }}>
         {loading ? (
           <div>Carregando ciclos...</div>
-        ) : ciclos.length === 0 ? (
-          <div className="text-muted">Nenhum ciclo encontrado.</div>
+        ) : filteredCiclos.length === 0 ? (
+          <div className="text-muted" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: 'var(--space-8)' }}>
+            Nenhum ciclo encontrado com os filtros atuais.
+          </div>
         ) : (
-          ciclos.map(ciclo => {
+          filteredCiclos.map(ciclo => {
             const isAberto = ciclo.status === 'ABERTO' || ciclo.status === 'REABERTO';
             const isRascunho = ciclo.status === 'RASCUNHO';
             const isFechado = ciclo.status === 'FECHADO';
@@ -348,37 +442,41 @@ export const Ciclos: React.FC = () => {
                 key={ciclo.id} 
                 className="blueprint card" 
                 style={{ 
-                  padding: 'var(--space-5)', 
+                  padding: '24px', 
                   display: 'flex', 
                   flexDirection: 'column', 
-                  gap: 'var(--space-4)',
-                  background: 'var(--color-surface)',
-                  border: isAberto ? (ciclo.status === 'REABERTO' ? '1px solid #d97706' : '1px solid #059669') : '1px solid var(--color-border)',
-                  boxShadow: isAberto ? (ciclo.status === 'REABERTO' ? '0 4px 20px rgba(217, 119, 6, 0.15)' : '0 4px 20px rgba(5, 150, 105, 0.15)') : 'none',
-                  transition: 'all 0.2s ease-in-out'
+                  gap: '16px',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderLeft: isAberto 
+                    ? (ciclo.status === 'REABERTO' ? '6px solid #d97706' : '6px solid #059669') 
+                    : isFechado ? '6px solid #dc2626' : '6px solid #475569',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+                  transition: 'all 0.2s ease-in-out',
+                  minHeight: '280px',
+                  borderRadius: '4px'
                 }}
               >
                 <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
                 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: '0 0 4px 0', fontSize: '20px', color: isAberto ? (ciclo.status === 'REABERTO' ? '#d97706' : '#059669') : 'var(--color-text)' }}>
-                      {ciclo.status === 'ABERTO' ? '🟢 ' : ciclo.status === 'REABERTO' ? '🟠 ' : isRascunho ? '📝 ' : '🔒 '}
-                      {ciclo.nome}
-                    </h3>
-                  </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '20px', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e293b' }}>
+                    {ciclo.status === 'ABERTO' ? '🟢 ' : ciclo.status === 'REABERTO' ? '🟠 ' : isRascunho ? '📝 ' : '🔒 '}
+                    {ciclo.nome}
+                  </h3>
                   {getStatusTag(ciclo.status)}
                 </div>
 
                 <div style={{ 
                   fontSize: '14px', 
                   color: 'var(--color-text-muted)', 
-                  background: 'var(--color-bg)', 
-                  padding: 'var(--space-3)', 
-                  borderRadius: 'var(--radius-sm)',
+                  background: '#f8fafc', 
+                  padding: '12px', 
+                  borderRadius: '6px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '8px'
+                  gap: '8px',
+                  border: '1px solid #e2e8f0'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '16px' }}>📅</span>
@@ -390,40 +488,45 @@ export const Ciclos: React.FC = () => {
                   </div>
                 </div>
 
-                {/* BOTÕES SECUNDÁRIOS: EDITAR / EXCLUIR */}
-                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '-8px' }}>
+                {/* AÇÕES DE EDIÇÃO/EXCLUSÃO */}
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-start' }}>
                   {!isFechado && (
-                    <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => openModal(ciclo)}>✏️ Editar</button>
+                    <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={() => openModal(ciclo)}>
+                      ✏️ Editar
+                    </button>
                   )}
                   {isRascunho && (
-                    <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--color-danger)' }} onClick={() => handleDelete(ciclo)}>🗑️ Excluir</button>
+                    <button className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: '13px', color: 'var(--color-danger)', display: 'flex', alignItems: 'center', gap: '4px' }} onClick={() => handleDelete(ciclo)}>
+                      🗑️ Excluir
+                    </button>
                   )}
                 </div>
 
+                {/* BOTÕES DE AÇÃO DE FLUXO */}
                 <div style={{ 
                   marginTop: 'auto', 
-                  display: 'flex', 
-                  gap: '12px', 
-                  flexWrap: 'wrap', 
-                  paddingTop: 'var(--space-4)', 
-                  borderTop: '1px solid var(--color-divider)' 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '8px', 
+                  paddingTop: '16px', 
+                  borderTop: '1px solid #e2e8f0' 
                 }}>
                   
                   {ciclo.status === 'RASCUNHO' && (
                     <>
                       <button 
                         className="btn btn-ghost" 
-                        style={{ flex: 1, fontSize: '13px', border: '1px solid var(--color-border)' }} 
+                        style={{ fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '4px', width: '100%', justifyContent: 'center' }} 
                         onClick={() => handleCloneBudget(ciclo.id)}
                       >
                         📋 Clonar Regras
                       </button>
                       <button 
                         className="btn btn-primary" 
-                        style={{ flex: 1, fontSize: '13px', background: '#059669', borderColor: '#059669' }} 
+                        style={{ fontSize: '13px', background: '#059669', borderColor: '#059669', color: '#ffffff', borderRadius: '4px', width: '100%', justifyContent: 'center' }} 
                         onClick={() => handleOpenCycle(ciclo.id)}
                       >
-                        Abrir Ciclo
+                        🔓 Abrir Ciclo
                       </button>
                     </>
                   )}
@@ -431,17 +534,17 @@ export const Ciclos: React.FC = () => {
                   {(ciclo.status === 'ABERTO' || ciclo.status === 'REABERTO') && (
                     <button 
                       className="btn" 
-                      style={{ flex: 1, fontSize: '13px', background: '#dc2626', color: 'white', fontWeight: 600, border: 'none' }} 
+                      style={{ gridColumn: 'span 2', fontSize: '13px', background: '#dc2626', color: 'white', fontWeight: 600, border: 'none', borderRadius: '4px', width: '100%', padding: '10px', justifyContent: 'center' }} 
                       onClick={() => handleCloseCycle(ciclo.id)}
                     >
-                      🔴 Encerrar Ciclo
+                      🔒 Encerrar Ciclo
                     </button>
                   )}
                   
                   {ciclo.status === 'FECHADO' && (
                     <button 
                       className="btn btn-ghost" 
-                      style={{ flex: 1, fontSize: '13px', color: '#d97706', border: '1px solid #d97706' }} 
+                      style={{ gridColumn: 'span 2', fontSize: '13px', color: '#d97706', border: '1px solid #d97706', borderRadius: '4px', width: '100%', padding: '10px', justifyContent: 'center' }} 
                       onClick={() => handleReopenCycle(ciclo.id)}
                     >
                       🔓 Reabrir Ciclo

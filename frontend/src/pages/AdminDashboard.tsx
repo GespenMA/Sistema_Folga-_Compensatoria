@@ -19,6 +19,8 @@ export const AdminDashboard: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [activeCycle, setActiveCycle] = useState<any>(null);
+  const [cycles, setCycles] = useState<any[]>([]);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>('');
   const [establishmentsCount, setEstablishmentsCount] = useState({ total: 0, capital: 0, interior: 0 });
   const [activeTab, setActiveTab] = useState<DashboardTab>('dashboard');
   const [globalSelectedUnits, setGlobalSelectedUnits] = useState<string[]>([]);
@@ -39,21 +41,36 @@ export const AdminDashboard: React.FC = () => {
   const [allEstablishments, setAllEstablishments] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (targetCycleId?: string) => {
     setLoading(true);
     setErrorMessage(null);
     try {
-        // 1. Ciclo Ativo
-        const { data: ciclos, error: ciclosError } = await supabase
+        // 1. Carrega todos os ciclos
+        const { data: cyclesList, error: cyclesError } = await supabase
           .from('cycles')
           .select('*')
-          .eq('status', 'ABERTO')
-          .order('data_inicio', { ascending: false })
-          .limit(1);
-        if (ciclosError) throw ciclosError;
-        
-        const ciclo = ciclos && ciclos.length > 0 ? ciclos[0] : null;
+          .order('ano', { ascending: false })
+          .order('mes', { ascending: false });
+        if (cyclesError) throw cyclesError;
+
+        const list = cyclesList || [];
+        setCycles(list);
+
+        let ciclo = null;
+        const cId = targetCycleId || selectedCycleId;
+
+        if (list.length > 0) {
+          if (cId) {
+            ciclo = list.find(c => c.id === cId);
+          }
+          if (!ciclo) {
+            // Tenta achar o ciclo Aberto ou Reaberto mais recente, senão o primeiro da lista
+            ciclo = list.find(c => c.status === 'ABERTO' || c.status === 'REABERTO') || list[0];
+          }
+        }
+
         setActiveCycle(ciclo);
+        setSelectedCycleId(ciclo ? ciclo.id : '');
 
         // 2. Estabelecimentos
         const { data: ests, error: establishmentsError } = await supabase
@@ -106,11 +123,16 @@ export const AdminDashboard: React.FC = () => {
       } finally {
         setLoading(false);
       }
-  }, []);
+  }, [selectedCycleId]);
 
   useEffect(() => {
     void fetchData();
-  }, [fetchData]);
+  }, []);
+
+  const handleCycleChange = (newCycleId: string) => {
+    setSelectedCycleId(newCycleId);
+    void fetchData(newCycleId);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -410,6 +432,36 @@ export const AdminDashboard: React.FC = () => {
           <p className="dashboard-description">Visão consolidada de todas as unidades penais do Estado.</p>
           
           <div style={{ display: 'flex', gap: '16px', marginTop: '16px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', textTransform: 'uppercase' }}>Visualizar Ciclo</label>
+              <select
+                className="input"
+                value={selectedCycleId}
+                onChange={e => handleCycleChange(e.target.value)}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--color-divider)',
+                  fontSize: '13px',
+                  background: '#fff',
+                  minWidth: '220px',
+                  height: '38px',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                {cycles.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome} ({c.status})
+                  </option>
+                ))}
+                {cycles.length === 0 && (
+                  <option value="">Nenhum Ciclo Encontrado</option>
+                )}
+              </select>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', position: 'relative' }} ref={dropdownRef}>
               <label style={{ fontSize: '12px', fontWeight: 600, color: '#475569', textTransform: 'uppercase' }}>Estabelecimento Penal</label>
               <input
@@ -541,20 +593,27 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="dashboard-header-actions">
+        <div className="dashboard-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           
-          <div style={{ padding: '10px 16px', border: '1px solid var(--color-divider)', borderRadius: '8px', background: '#fff', fontSize: '14px', fontWeight: 600, display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <Calendar size={18} color="var(--color-text-muted)" />
-            {activeCycle ? activeCycle.nome : 'Nenhum Ciclo Aberto'}
-          </div>
-
           {activeCycle && (
-            <div style={{ padding: '8px 16px', borderRadius: '8px', background: '#ecfdf5', border: '1px solid #10b981', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ fontSize: '11px', fontWeight: 700, color: '#047857', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
-                Ciclo Aberto
+            <div style={{ 
+              padding: '6px 16px', 
+              borderRadius: '8px', 
+              background: activeCycle.status === 'ABERTO' || activeCycle.status === 'REABERTO' ? '#ecfdf5' : '#f1f5f9', 
+              border: activeCycle.status === 'ABERTO' || activeCycle.status === 'REABERTO' ? '1px solid #10b981' : '1px solid #cbd5e1', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              height: '38px'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: activeCycle.status === 'ABERTO' || activeCycle.status === 'REABERTO' ? '#047857' : '#475569', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: activeCycle.status === 'ABERTO' || activeCycle.status === 'REABERTO' ? '#10b981' : '#64748b', display: 'inline-block' }}></span>
+                Ciclo {activeCycle.status}
               </div>
-              <div style={{ fontSize: '12px', color: '#065f46', marginTop: '2px' }}>{formatDateString(activeCycle.data_inicio)} até {formatDateString(activeCycle.data_fim)}</div>
+              <div style={{ fontSize: '11px', color: activeCycle.status === 'ABERTO' || activeCycle.status === 'REABERTO' ? '#065f46' : '#334155', marginTop: '2px', fontWeight: 500 }}>
+                {formatDateString(activeCycle.data_inicio)} a {formatDateString(activeCycle.data_fim)}
+              </div>
             </div>
           )}
 
