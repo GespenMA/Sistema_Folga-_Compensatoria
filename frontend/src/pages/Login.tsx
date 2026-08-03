@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Navigate } from 'react-router-dom';
-import { Lock, Mail, ArrowRight, ShieldCheck, Eye, EyeOff, HelpCircle } from 'lucide-react';
+import { Lock, Mail, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import seapLogo from '../assets/seap-logo.png';
 
 const loginStyles = `

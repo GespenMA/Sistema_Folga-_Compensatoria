@@ -708,7 +708,7 @@ export const Configuracoes: React.FC = () => {
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button className="btn btn-ghost" onClick={handleResetImport}>Cancelar</button>
-                        <button className="btn btn-primary blueprint" onClick={handleConfirmImport}>
+                        <button className="btn btn-primary blueprint" onClick={() => handleConfirmImport()}>
                           <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
                           ✅ Confirmar Importação
                         </button>

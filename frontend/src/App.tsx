@@ -12,13 +12,7 @@ import { Ciclos } from './pages/admin/Ciclos';
 import { Relatorios } from './pages/admin/Relatorios';
 import { Solicitacoes as AdminSolicitacoes } from './pages/admin/Solicitacoes';
 
-// Placeholder component for routes not yet implemented
-const Placeholder = ({ title }: { title: string }) => (
-  <div style={{ padding: 'var(--space-6)' }}>
-    <h1 style={{ margin: '0 0 var(--space-4) 0', fontSize: '24px' }}>{title}</h1>
-    <p style={{ color: 'var(--color-text-muted)' }}>Módulo em desenvolvimento.</p>
-  </div>
-);
+
 
 // Importações do módulo Estabelecimento
 import { EstabelecimentoLayout } from './layouts/EstabelecimentoLayout';

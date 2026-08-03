@@ -21,7 +21,6 @@ type Employee = {
 export const Servidores: React.FC = () => {
   const { profile } = useAuth();
   const [servidores, setServidores] = useState<Employee[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Modal removido pois os dados vêm da importação da planilha
@@ -37,7 +36,9 @@ export const Servidores: React.FC = () => {
     try {
       // Busca Cargos
       const { data: posData } = await supabase.from('positions').select('id, nome, codigo').eq('ativo', true).order('nome');
-      if (posData) setPositions(posData);
+      if (posData) {
+        // positions data fetched but not stored in state to avoid unused variable TS error
+      }
 
       // Busca Servidores da Unidade
       await fetchServidores();

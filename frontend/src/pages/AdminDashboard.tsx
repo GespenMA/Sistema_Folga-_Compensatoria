@@ -415,7 +415,7 @@ export const AdminDashboard: React.FC = () => {
         <AlertCircle size={28} aria-hidden="true" />
         <strong>Não foi possível carregar o dashboard</strong>
         <p>{errorMessage}</p>
-        <button className="btn btn-secondary" type="button" onClick={fetchData}>
+        <button className="btn btn-secondary" type="button" onClick={() => fetchData()}>
           Tentar novamente
         </button>
       </div>
