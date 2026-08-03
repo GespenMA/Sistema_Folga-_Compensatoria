@@ -10,6 +10,7 @@ import { Estabelecimentos } from './pages/admin/Estabelecimentos';
 import { Configuracoes } from './pages/admin/Configuracoes';
 import { Ciclos } from './pages/admin/Ciclos';
 import { Relatorios } from './pages/admin/Relatorios';
+import { Solicitacoes as AdminSolicitacoes } from './pages/admin/Solicitacoes';
 
 // Placeholder component for routes not yet implemented
 const Placeholder = ({ title }: { title: string }) => (
@@ -26,6 +27,7 @@ import { Servidores } from './pages/estabelecimento/Servidores';
 import { Folgas } from './pages/estabelecimento/Folgas';
 import { Solicitacoes } from './pages/estabelecimento/Solicitacoes';
 import { Simulador } from './pages/estabelecimento/Simulador';
+import { Relatorios as EstabelecimentoRelatorios } from './pages/estabelecimento/Relatorios';
 
 // Componente para rotas protegidas
 const ProtectedRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: ('ADMIN' | 'ESTABELECIMENTO' | 'GESTAO')[] }) => {
@@ -80,7 +82,7 @@ function App() {
             <Route index element={<AdminDashboard />} />
             <Route path="ciclos" element={<Ciclos />} />
             <Route path="estabelecimentos" element={<Estabelecimentos />} />
-            <Route path="solicitacoes" element={<Placeholder title="Solicitações" />} />
+            <Route path="solicitacoes" element={<AdminSolicitacoes />} />
             <Route path="relatorios" element={<Relatorios />} />
             <Route 
               path="configuracoes" 
@@ -106,6 +108,7 @@ function App() {
             <Route path="folgas" element={<Folgas />} />
             <Route path="solicitacoes" element={<Solicitacoes />} />
             <Route path="simulador" element={<Simulador />} />
+            <Route path="relatorios" element={<EstabelecimentoRelatorios />} />
           </Route>
         </Routes>
       </BrowserRouter>

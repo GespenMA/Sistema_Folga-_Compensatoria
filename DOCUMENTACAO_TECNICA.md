@@ -1,4 +1,4 @@
-# SIFOC — Sistema Integrado de Folga Compensatória
+# Compensa+ — Sistema Integrado de Gestão de Folgas Compensatórias
 ## Documentação Técnica Completa — v1.0
 
 > **Órgão:** Secretaria de Estado da Administração Penitenciária do Maranhão (SEAP-MA)  

@@ -421,7 +421,7 @@ export const Relatorios: React.FC = () => {
       // Cabeçalho
       doc.setFontSize(16);
       doc.setTextColor(30, 58, 138);
-      doc.text('SEAP — Sistema de Folga Compensatória', 14, 16);
+      doc.text('SEAP — Compensa+', 14, 16);
       doc.setFontSize(11);
       doc.setTextColor(71, 85, 105);
       const tabLabel = activeTab === 'orcado_gasto'

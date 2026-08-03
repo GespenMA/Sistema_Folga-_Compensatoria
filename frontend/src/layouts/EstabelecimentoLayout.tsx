@@ -45,7 +45,7 @@ export const EstabelecimentoLayout: React.FC = () => {
       <div className="mobile-header-bar" style={{ background: '#0f172a', padding: '16px', alignItems: 'center', justifyContent: 'space-between', color: 'white', zIndex: 30 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <ShieldAlert size={24} color="#60a5fa" />
-          <h2 style={{ fontSize: '15px', margin: 0, fontWeight: 700 }}>SIFOC</h2>
+          <h2 style={{ fontSize: '15px', margin: 0, fontWeight: 700 }}>Compensa+</h2>
         </div>
         <button onClick={() => setIsMobileMenuOpen(true)} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', padding: 0 }}>
           <Menu size={24} />
@@ -86,7 +86,7 @@ export const EstabelecimentoLayout: React.FC = () => {
             </div>
             {!isCollapsed && (
               <div>
-                <h2 style={{ fontSize: '15px', margin: '0 0 2px 0', color: '#f8fafc', lineHeight: 1.2 }}>SIFOC</h2>
+                <h2 style={{ fontSize: '15px', margin: '0 0 2px 0', color: '#f8fafc', lineHeight: 1.2 }}>Compensa+</h2>
                 <div style={{ fontSize: '11px', color: '#94a3b8' }}>Módulo da Unidade</div>
               </div>
             )}
