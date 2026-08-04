@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './pages/Login';
+import { UpdatePasswordModal } from './components/UpdatePasswordModal';
 
 import { AdminLayout } from './layouts/AdminLayout';
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -11,6 +12,7 @@ import { Configuracoes } from './pages/admin/Configuracoes';
 import { Ciclos } from './pages/admin/Ciclos';
 import { Relatorios } from './pages/admin/Relatorios';
 import { Solicitacoes as AdminSolicitacoes } from './pages/admin/Solicitacoes';
+import { Tutorial } from './pages/Tutorial';
 
 
 
@@ -59,6 +61,7 @@ const HomeSwitcher = () => {
 function App() {
   return (
     <AuthProvider>
+      <UpdatePasswordModal />
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -78,6 +81,7 @@ function App() {
             <Route path="estabelecimentos" element={<Estabelecimentos />} />
             <Route path="solicitacoes" element={<AdminSolicitacoes />} />
             <Route path="relatorios" element={<Relatorios />} />
+            <Route path="tutorial" element={<Tutorial />} />
             <Route 
               path="configuracoes" 
               element={
@@ -103,6 +107,7 @@ function App() {
             <Route path="solicitacoes" element={<Solicitacoes />} />
             <Route path="simulador" element={<Simulador />} />
             <Route path="relatorios" element={<EstabelecimentoRelatorios />} />
+            <Route path="tutorial" element={<Tutorial />} />
           </Route>
         </Routes>
       </BrowserRouter>

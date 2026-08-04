@@ -334,12 +334,7 @@ export const Login: React.FC = () => {
               )}
             </button>
             
-            {/* Links Auxiliares */}
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '16px' }}>
-              <a href="#" style={{ fontSize: '13px', color: '#64748b', textDecoration: 'none', transition: 'color 0.2s' }} onMouseOver={e => e.currentTarget.style.color = '#3b82f6'} onMouseOut={e => e.currentTarget.style.color = '#64748b'}>
-                Esqueceu a senha?
-              </a>
-            </div>
+
 
           </form>
 

@@ -19,7 +19,7 @@ type ProfileUser = {
 };
 
 export const Configuracoes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'cargos' | 'importacao'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'cargos' | 'importacao' | 'tutoriais'>('usuarios');
   
   // Estados para Usuários
   const [usuarios, setUsuarios] = useState<ProfileUser[]>([]);
@@ -46,6 +46,20 @@ export const Configuracoes: React.FC = () => {
   const [cargoValor, setCargoValor] = useState('');
   const [isSubmittingCargo, setIsSubmittingCargo] = useState(false);
 
+  // Estados para Tutoriais
+  const [tutoriais, setTutoriais] = useState<any[]>([]);
+  const [loadingTutoriais, setLoadingTutoriais] = useState(false);
+  const [isTutorialModalOpen, setIsTutorialModalOpen] = useState(false);
+  const [tutorialEditId, setTutorialEditId] = useState<string | null>(null);
+  const [tutorialTitulo, setTutorialTitulo] = useState('');
+  const [tutorialDescricao, setTutorialDescricao] = useState('');
+  const [tutorialUrl, setTutorialUrl] = useState('');
+  const [isSubmittingTutorial, setIsSubmittingTutorial] = useState(false);
+
+  // Estados para Alertas/Confirm
+  const [confirmResetEmail, setConfirmResetEmail] = useState<string | null>(null);
+  const [alertMessage, setAlertMessage] = useState<{title: string, msg: string, type: 'success' | 'error'} | null>(null);
+
   // =============================================
   // Estados para Importação Mensal
   // =============================================
@@ -69,6 +83,8 @@ export const Configuracoes: React.FC = () => {
       fetchCargos();
     } else if (activeTab === 'importacao') {
       fetchActiveCycleForImport();
+    } else if (activeTab === 'tutoriais') {
+      fetchTutoriais();
     }
   }, [activeTab]);
 
@@ -85,6 +101,74 @@ export const Configuracoes: React.FC = () => {
       setActiveCycleForImport(data || null);
     } finally {
       setLoadingImportCycle(false);
+    }
+  };
+
+  const fetchTutoriais = async () => {
+    setLoadingTutoriais(true);
+    try {
+      const { data, error } = await supabase.from('tutorials').select('*').order('created_at', { ascending: false });
+      if (error && error.code !== '42P01') throw error; // Ignora se tabela não existe ainda
+      if (data) setTutoriais(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingTutoriais(false);
+    }
+  };
+
+  const openNewTutorialModal = () => {
+    setTutorialEditId(null);
+    setTutorialTitulo('');
+    setTutorialDescricao('');
+    setTutorialUrl('');
+    setIsTutorialModalOpen(true);
+  };
+
+  const openEditTutorialModal = (tut: any) => {
+    setTutorialEditId(tut.id);
+    setTutorialTitulo(tut.titulo);
+    setTutorialDescricao(tut.descricao || '');
+    setTutorialUrl(tut.youtube_url);
+    setIsTutorialModalOpen(true);
+  };
+
+  const handleDeleteTutorial = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir este tutorial?')) return;
+    try {
+      const { error } = await supabase.from('tutorials').delete().eq('id', id);
+      if (error) throw error;
+      fetchTutoriais();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao excluir tutorial.');
+    }
+  };
+
+  const handleSaveTutorial = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tutorialTitulo.trim() || !tutorialUrl.trim()) return;
+
+    setIsSubmittingTutorial(true);
+    try {
+      const payload = {
+        titulo: tutorialTitulo,
+        descricao: tutorialDescricao,
+        youtube_url: tutorialUrl
+      };
+
+      if (tutorialEditId) {
+        const { error } = await supabase.from('tutorials').update(payload).eq('id', tutorialEditId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('tutorials').insert([payload]);
+        if (error) throw error;
+      }
+      setIsTutorialModalOpen(false);
+      fetchTutoriais();
+    } catch (err: any) {
+      alert(err.message || 'Erro ao salvar tutorial.');
+    } finally {
+      setIsSubmittingTutorial(false);
     }
   };
 
@@ -212,6 +296,23 @@ export const Configuracoes: React.FC = () => {
       alert(err.message || 'Erro ao cadastrar usuário.');
     } finally {
       setIsSubmittingUser(false);
+    }
+  };
+
+  const handleResetPassword = (email: string) => {
+    setConfirmResetEmail(email);
+  };
+
+  const executeResetPassword = async () => {
+    if (!confirmResetEmail) return;
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(confirmResetEmail);
+      if (error) throw error;
+      setAlertMessage({ title: 'Sucesso', msg: `E-mail de redefinição enviado com sucesso para ${confirmResetEmail}!`, type: 'success' });
+    } catch (err: any) {
+      setAlertMessage({ title: 'Erro', msg: err.message || 'Erro ao enviar e-mail de redefinição.', type: 'error' });
+    } finally {
+      setConfirmResetEmail(null);
     }
   };
 
@@ -550,6 +651,10 @@ export const Configuracoes: React.FC = () => {
           <input type="radio" name="config-tab" checked={activeTab === 'importacao'} onChange={() => setActiveTab('importacao')} />
           📥 Importação Mensal
         </label>
+        <label className="seg-opt" style={{ padding: 'var(--space-2) var(--space-4)' }}>
+          <input type="radio" name="config-tab" checked={activeTab === 'tutoriais'} onChange={() => setActiveTab('tutoriais')} />
+          📺 Tutoriais
+        </label>
       </div>
 
       {activeTab === 'usuarios' && (
@@ -573,6 +678,7 @@ export const Configuracoes: React.FC = () => {
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>E-mail</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Perfil</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -585,6 +691,9 @@ export const Configuracoes: React.FC = () => {
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                       {user.ativo ? <span className="tag" style={{ background: 'var(--color-accent-500)', color: 'white' }}>Ativo</span> : <span className="tag tag-outline">Inativo</span>}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right' }}>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleResetPassword(user.email)}>📧 Redefinir Senha</button>
                     </td>
                   </tr>
                 ))}
@@ -819,6 +928,49 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
+      {activeTab === 'tutoriais' && (
+        <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
+          <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+          
+          <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-divider)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontWeight: 600 }}>Tutoriais em Vídeo</div>
+            <button className="btn btn-primary" onClick={openNewTutorialModal}>
+              + Novo Tutorial
+            </button>
+          </div>
+
+          {loadingTutoriais ? (
+            <div style={{ padding: 'var(--space-4)' }}>Carregando tutoriais...</div>
+          ) : tutoriais.length === 0 ? (
+             <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              Nenhum tutorial cadastrado.
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Título</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Descrição</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tutoriais.map(tut => (
+                  <tr key={tut.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500 }}>{tut.titulo}</td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>{tut.descricao}</td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => openEditTutorialModal(tut)}>✏️ Editar</button>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--color-danger)' }} onClick={() => handleDeleteTutorial(tut.id)}>🗑️ Excluir</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
       {/* Modal Usuário */}
       {isUserModalOpen && (
         <div style={{
@@ -937,6 +1089,114 @@ export const Configuracoes: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tutorial */}
+      {isTutorialModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div className="blueprint card elev-md" style={{ width: '450px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
+            <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>
+              {tutorialEditId ? 'Editar Tutorial' : 'Novo Tutorial'}
+            </h3>
+            
+            <form onSubmit={handleSaveTutorial}>
+              <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
+                <label>Título *</label>
+                <input 
+                  className="input" 
+                  type="text" 
+                  value={tutorialTitulo} 
+                  onChange={(e) => setTutorialTitulo(e.target.value)} 
+                  required 
+                  placeholder="Ex: Como lançar plantões extras"
+                />
+              </div>
+
+              <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
+                <label>Descrição</label>
+                <textarea 
+                  className="input" 
+                  value={tutorialDescricao} 
+                  onChange={(e) => setTutorialDescricao(e.target.value)} 
+                  placeholder="Breve descrição do tutorial"
+                  rows={3}
+                />
+              </div>
+
+              <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
+                <label>URL do YouTube *</label>
+                <input 
+                  className="input" 
+                  type="url" 
+                  value={tutorialUrl} 
+                  onChange={(e) => setTutorialUrl(e.target.value)} 
+                  required 
+                  placeholder="Ex: https://youtube.com/watch?v=..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setIsTutorialModalOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary blueprint" disabled={isSubmittingTutorial}>
+                  <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+                  {isSubmittingTutorial ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Confirm Reset Password */}
+      {confirmResetEmail && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000
+        }}>
+          <div className="blueprint card elev-md" style={{ width: '400px', padding: 'var(--space-6)', background: 'var(--color-surface)', textAlign: 'center' }}>
+            <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-3)' }}>Redefinir Senha</h3>
+            <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)' }}>
+              Tem certeza que deseja enviar um e-mail com link de redefinição para <strong>{confirmResetEmail}</strong>?
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'center' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setConfirmResetEmail(null)}>Cancelar</button>
+              <button type="button" className="btn btn-primary blueprint" onClick={executeResetPassword}>
+                <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+                Sim, Enviar E-mail
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Alert (Success/Error) */}
+      {alertMessage && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000
+        }}>
+          <div className="blueprint card elev-md" style={{ width: '400px', padding: 'var(--space-6)', background: 'var(--color-surface)', textAlign: 'center' }}>
+            <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+            <div style={{ fontSize: '32px', marginBottom: 'var(--space-3)' }}>
+              {alertMessage.type === 'success' ? '✅' : '⚠️'}
+            </div>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-3)', color: alertMessage.type === 'error' ? 'var(--color-danger)' : 'var(--color-accent-600)' }}>
+              {alertMessage.title}
+            </h3>
+            <p style={{ color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)' }}>
+              {alertMessage.msg}
+            </p>
+            <button type="button" className="btn btn-primary blueprint" onClick={() => setAlertMessage(null)}>
+              <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+              OK
+            </button>
           </div>
         </div>
       )}

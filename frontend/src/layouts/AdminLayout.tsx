@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, FileBadge, BarChart3, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, X, Calendar } from 'lucide-react';
+import { LayoutDashboard, Building2, FileBadge, BarChart3, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, X, Calendar, PlayCircle } from 'lucide-react';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
@@ -111,6 +111,9 @@ export const AdminLayout: React.FC = () => {
             </NavLink>
             <NavLink to="/admin/relatorios" style={getLinkStyle} title="Relatórios" onClick={() => setIsMobileMenuOpen(false)}>
               <BarChart3 size={20} /> {!isCollapsed && "Relatórios"}
+            </NavLink>
+            <NavLink to="/admin/tutorial" style={getLinkStyle} title="Tutoriais" onClick={() => setIsMobileMenuOpen(false)}>
+              <PlayCircle size={20} /> {!isCollapsed && "Tutoriais"}
             </NavLink>
             
             {profile?.perfil === 'ADMIN' && (

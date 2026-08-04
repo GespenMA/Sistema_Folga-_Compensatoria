@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Users, CalendarClock, ShoppingCart, Calculator, BarChart3, LogOut, ShieldAlert, ChevronLeft, ChevronRight, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, CalendarClock, ShoppingCart, Calculator, BarChart3, LogOut, ShieldAlert, ChevronLeft, ChevronRight, Menu, X, PlayCircle } from 'lucide-react';
 
 export const EstabelecimentoLayout: React.FC = () => {
   const { signOut, profile } = useAuth();
@@ -117,6 +117,9 @@ export const EstabelecimentoLayout: React.FC = () => {
             </NavLink>
             <NavLink to="/estabelecimento/relatorios" style={getLinkStyle} title="Relatórios">
               <BarChart3 size={20} /> {!isCollapsed && "Relatórios"}
+            </NavLink>
+            <NavLink to="/estabelecimento/tutorial" style={getLinkStyle} title="Tutoriais">
+              <PlayCircle size={20} /> {!isCollapsed && "Tutoriais"}
             </NavLink>
 
           </nav>
