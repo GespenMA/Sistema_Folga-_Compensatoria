@@ -109,7 +109,7 @@ export const Configuracoes: React.FC = () => {
   const fetchTutoriais = async () => {
     setLoadingTutoriais(true);
     try {
-      const { data, error } = await supabase.from('tutorials').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase.from('tutorials').select('*').order('titulo', { ascending: true });
       if (error && error.code !== '42P01') throw error; // Ignora se tabela não existe ainda
       if (data) setTutoriais(data);
     } catch (err) {

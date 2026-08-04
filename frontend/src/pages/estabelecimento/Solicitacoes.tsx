@@ -56,6 +56,14 @@ export const Solicitacoes: React.FC = () => {
   const [buscaFolga, setBuscaFolga] = useState('');
   const [filtroCargoFolga, setFiltroCargoFolga] = useState('');
 
+  // Modal de Confirmação Genérico
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+  } | null>(null);
+
   // Status de Limite
   const [totalOrcado, setTotalOrcado] = useState(0);
   const [totalGasto, setTotalGasto] = useState(0);
@@ -373,14 +381,24 @@ export const Solicitacoes: React.FC = () => {
     fetchData(false);
   };
 
-  const handleCancelRequest = async (solicitacao: Solicitacao) => {
+  const handleCancelRequest = (solicitacao: Solicitacao) => {
     if (solicitacao.status !== 'SOLICITADA' && solicitacao.status !== 'APROVADA') {
       alert('Apenas solicitações aguardando aprovação ou aprovadas podem ser canceladas.');
       return;
     }
     
-    if (!window.confirm('Tem certeza que deseja cancelar? O orçamento será devolvido e a folga voltará a ficar disponível.')) return;
-    
+    setConfirmAction({
+      title: 'Cancelar Solicitação',
+      message: 'Tem certeza que deseja cancelar? O orçamento será devolvido e a folga voltará a ficar disponível.',
+      confirmText: 'Sim, Cancelar',
+      onConfirm: () => {
+        setConfirmAction(null);
+        executeCancelRequest(solicitacao);
+      }
+    });
+  };
+
+  const executeCancelRequest = async (solicitacao: Solicitacao) => {
     try {
       // 1. Atualizar a solicitação para CANCELADA
       const { error: reqError } = await supabase
@@ -414,10 +432,20 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
-  const handleBulkApprove = async () => {
+  const handleBulkApprove = () => {
     if (selectedRequests.length === 0) return;
-    if (!window.confirm(`Tem certeza que deseja APROVAR as ${selectedRequests.length} solicitações selecionadas? O valor será debitado do orçamento permanentemente.`)) return;
-    
+    setConfirmAction({
+      title: 'Aprovar Solicitações',
+      message: `Tem certeza que deseja APROVAR as ${selectedRequests.length} solicitações selecionadas? O valor será debitado do orçamento permanentemente.`,
+      confirmText: 'Sim, Aprovar',
+      onConfirm: () => {
+        setConfirmAction(null);
+        executeBulkApprove();
+      }
+    });
+  };
+
+  const executeBulkApprove = async () => {
     setIsSubmitting(true);
     let errorCount = 0;
     
@@ -462,8 +490,19 @@ export const Solicitacoes: React.FC = () => {
     fetchData(false);
   };
 
-  const handleApproveRequest = async (solicitacao: Solicitacao) => {
-    if (!window.confirm('Tem certeza que deseja APROVAR esta compra? O valor será debitado do orçamento permanentemente.')) return;
+  const handleApproveRequest = (solicitacao: Solicitacao) => {
+    setConfirmAction({
+      title: 'Aprovar Compra',
+      message: 'Tem certeza que deseja APROVAR esta compra? O valor será debitado do orçamento permanentemente.',
+      confirmText: 'Sim, Aprovar',
+      onConfirm: () => {
+        setConfirmAction(null);
+        executeApproveRequest(solicitacao);
+      }
+    });
+  };
+
+  const executeApproveRequest = async (solicitacao: Solicitacao) => {
     try {
       const { error: reqError } = await supabase
         .from('purchase_requests')
@@ -923,6 +962,31 @@ export const Solicitacoes: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação Genérico */}
+      {confirmAction && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div className="blueprint card elev-md" style={{ width: '400px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>{confirmAction.title}</h3>
+            <p style={{ color: 'var(--color-text)', marginBottom: 'var(--space-5)', lineHeight: 1.5 }}>
+              {confirmAction.message}
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setConfirmAction(null)}>Cancelar</button>
+              <button 
+                className="btn btn-primary blueprint" 
+                onClick={confirmAction.onConfirm}
+              >
+                <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+                {confirmAction.confirmText || 'Confirmar'}
+              </button>
+            </div>
           </div>
         </div>
       )}
