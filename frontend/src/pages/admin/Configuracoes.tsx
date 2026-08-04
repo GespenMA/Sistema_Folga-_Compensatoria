@@ -27,6 +27,12 @@ export const Configuracoes: React.FC = () => {
   const [estabelecimentos, setEstabelecimentos] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
 
+  // Estados de Filtro e Paginação para Usuários
+  const [filterUserNome, setFilterUserNome] = useState('');
+  const [filterUserPerfil, setFilterUserPerfil] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const usersPerPage = 10;
+
   // Estados para Modal Usuário
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [userEditId, setUserEditId] = useState<string | null>(null);
@@ -76,6 +82,15 @@ export const Configuracoes: React.FC = () => {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const filteredUsers = usuarios.filter(u => {
+    const matchNome = u.nome.toLowerCase().includes(filterUserNome.toLowerCase()) || u.email.toLowerCase().includes(filterUserNome.toLowerCase());
+    const matchPerfil = filterUserPerfil ? u.perfil === filterUserPerfil : true;
+    return matchNome && matchPerfil;
+  });
+
+  const totalUserPages = Math.ceil(filteredUsers.length / usersPerPage);
+  const paginatedUsers = filteredUsers.slice((userPage - 1) * usersPerPage, userPage * usersPerPage);
 
   useEffect(() => {
     if (activeTab === 'usuarios') {
@@ -707,39 +722,115 @@ export const Configuracoes: React.FC = () => {
             </button>
           </div>
 
+          <div style={{ padding: 'var(--space-4)', background: 'var(--color-surface-alt)', borderBottom: '1px solid var(--color-divider)', display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+                Buscar por Nome / E-mail
+              </label>
+              <input 
+                type="text" 
+                placeholder="Ex: João..."
+                value={filterUserNome}
+                onChange={e => { setFilterUserNome(e.target.value); setUserPage(1); }}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+              />
+            </div>
+
+            <div style={{ flex: '1 1 150px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+                Perfil
+              </label>
+              <select 
+                value={filterUserPerfil} 
+                onChange={e => { setFilterUserPerfil(e.target.value); setUserPage(1); }}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+              >
+                <option value="">Todos</option>
+                <option value="ADMIN">Administrador</option>
+                <option value="ESTABELECIMENTO">Estabelecimento</option>
+                <option value="GESTOR">Gestor</option>
+              </select>
+            </div>
+          </div>
+
           {loadingUsers ? (
-            <div style={{ padding: 'var(--space-4)' }}>Carregando...</div>
+            <div style={{ padding: 'var(--space-6)', textAlign: 'center' }}>Carregando...</div>
+          ) : filteredUsers.length === 0 ? (
+            <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              Nenhum usuário corresponde aos filtros aplicados.
+            </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
-                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Nome</th>
-                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>E-mail</th>
-                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Perfil</th>
-                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
-                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usuarios.map(user => (
-                  <tr key={user.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500 }}>{user.nome}</td>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>{user.email}</td>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                      <span className="tag" style={{ background: 'var(--color-surface)' }}>{user.perfil}</span>
-                    </td>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                      {user.ativo ? <span className="tag" style={{ background: 'var(--color-accent-500)', color: 'white' }}>Ativo</span> : <span className="tag tag-outline">Inativo</span>}
-                    </td>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleResetPassword(user.email)}>📧 Senha</button>
-                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => openEditUserModal(user)}>✏️ Editar</button>
-                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--color-danger)' }} onClick={() => handleDeleteUser(user.id)}>🗑️ Excluir</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                      <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Nome</th>
+                      <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>E-mail</th>
+                      <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Perfil</th>
+                      <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
+                      <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedUsers.map(user => (
+                      <tr key={user.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500 }}>{user.nome}</td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)' }}>{user.email}</td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                          <span className="tag" style={{ background: 'var(--color-surface)' }}>{user.perfil}</span>
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                          {user.ativo ? <span className="tag" style={{ background: 'var(--color-accent-500)', color: 'white' }}>Ativo</span> : <span className="tag tag-outline">Inativo</span>}
+                        </td>
+                        <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleResetPassword(user.email)}>📧 Senha</button>
+                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => openEditUserModal(user)}>✏️ Editar</button>
+                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--color-danger)' }} onClick={() => handleDeleteUser(user.id)}>🗑️ Excluir</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {totalUserPages > 1 && (
+                <div style={{ padding: 'var(--space-4)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-divider)' }}>
+                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                    Mostrando {((userPage - 1) * usersPerPage) + 1} até {Math.min(userPage * usersPerPage, filteredUsers.length)} de {filteredUsers.length} registros
+                  </div>
+                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                    <button 
+                      className="btn btn-ghost" 
+                      style={{ padding: '4px 12px' }} 
+                      disabled={userPage === 1}
+                      onClick={() => setUserPage(p => Math.max(1, p - 1))}
+                    >
+                      Anterior
+                    </button>
+                    {Array.from({ length: totalUserPages }, (_, i) => i + 1).map(p => (
+                      <button
+                        key={p}
+                        className={`btn ${p === userPage ? 'btn-primary blueprint' : 'btn-ghost'}`}
+                        style={{ padding: '4px 12px', minWidth: '32px' }}
+                        onClick={() => setUserPage(p)}
+                      >
+                        {p === userPage && <><i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i></>}
+                        {p}
+                      </button>
+                    ))}
+                    <button 
+                      className="btn btn-ghost" 
+                      style={{ padding: '4px 12px' }} 
+                      disabled={userPage === totalUserPages}
+                      onClick={() => setUserPage(p => Math.min(totalUserPages, p + 1))}
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

@@ -9,6 +9,7 @@ type Profile = {
   perfil: 'ADMIN' | 'ESTABELECIMENTO' | 'GESTAO';
   establishment_id: string | null;
   ativo: boolean;
+  must_change_password: boolean;
   establishments?: { nome: string };
 };
 
