@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase';
 import { 
   Wallet, FileText, Landmark, Building2, Calendar, Bell, 
-  Download, FileSpreadsheet, Eye, 
+  Download, Eye, 
   AlertTriangle, AlertCircle, Info, ArrowRight
 } from 'lucide-react';
 import {
@@ -343,10 +343,6 @@ export const AdminDashboard: React.FC = () => {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setActionMessage(`${filteredUnidades.length} unidade(s) exportada(s) com sucesso.`);
-  };
-
-  const handleUnitAction = (action: string, unitName: string) => {
-    setActionMessage(`${action} para ${unitName} ficará disponível no módulo de detalhes.`);
   };
 
   // Alertas
