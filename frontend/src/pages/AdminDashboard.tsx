@@ -9,12 +9,14 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
+import { useNavigate } from 'react-router-dom';
 
 type DashboardTab = 'dashboard' | 'detalhamento';
 type UnitStatusFilter = 'Todos' | 'Normal' | 'Atenção' | 'Crítico';
 type LocationFilter = string;
 
 export const AdminDashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -40,6 +42,8 @@ export const AdminDashboard: React.FC = () => {
   const [cycleEstablishments, setCycleEstablishments] = useState<any[]>([]);
   const [allEstablishments, setAllEstablishments] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
+
+
 
   const fetchData = useCallback(async (targetCycleId?: string) => {
     setLoading(true);
@@ -148,6 +152,9 @@ export const AdminDashboard: React.FC = () => {
   }, []);
 
   // MÉTODOS E CÁLCULOS DERIVADOS
+  const viewEstablishmentDetails = (unidade: any) => {
+    navigate(`/admin/servidores?est_id=${unidade.id}`);
+  };
   const today = new Date();
   
   const availableLocations = useMemo(() => {
@@ -1115,8 +1122,7 @@ export const AdminDashboard: React.FC = () => {
                   <td style={{ padding: '12px 16px' }}>{getStatusBadge(u.status)}</td>
                   <td style={{ textAlign: 'center', padding: '12px 16px' }}>
                     <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                      <button className="btn-ghost" type="button" title="Visualizar Detalhes" aria-label={`Visualizar detalhes de ${u.nome}`} onClick={() => handleUnitAction('Visualização de detalhes', u.nome)} style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><Eye size={16} aria-hidden="true" /></button>
-                      <button className="btn-ghost" type="button" title="Relatório" aria-label={`Gerar relatório de ${u.nome}`} onClick={() => handleUnitAction('Relatório', u.nome)} style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><FileSpreadsheet size={16} aria-hidden="true" /></button>
+                      <button className="btn-ghost" type="button" title="Visualizar Servidores" aria-label={`Visualizar servidores de ${u.nome}`} onClick={() => viewEstablishmentDetails(u)} style={{ padding: '4px', border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b' }}><Eye size={16} aria-hidden="true" /></button>
                     </div>
                   </td>
                 </tr>

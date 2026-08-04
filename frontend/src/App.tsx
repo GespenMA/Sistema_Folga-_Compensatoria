@@ -13,6 +13,8 @@ import { Ciclos } from './pages/admin/Ciclos';
 import { Relatorios } from './pages/admin/Relatorios';
 import { Solicitacoes as AdminSolicitacoes } from './pages/admin/Solicitacoes';
 import { Tutorial } from './pages/Tutorial';
+import { DetalhamentoEstabelecimento } from './pages/admin/DetalhamentoEstabelecimento';
+import { Servidores as AdminServidores } from './pages/admin/Servidores';
 
 
 
@@ -79,9 +81,11 @@ function App() {
             <Route index element={<AdminDashboard />} />
             <Route path="ciclos" element={<Ciclos />} />
             <Route path="estabelecimentos" element={<Estabelecimentos />} />
+            <Route path="servidores" element={<AdminServidores />} />
             <Route path="solicitacoes" element={<AdminSolicitacoes />} />
             <Route path="relatorios" element={<Relatorios />} />
             <Route path="tutorial" element={<Tutorial />} />
+            <Route path="estabelecimentos/:id/servidores" element={<DetalhamentoEstabelecimento />} />
             <Route 
               path="configuracoes" 
               element={

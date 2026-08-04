@@ -508,6 +508,7 @@ Aplicadas manualmente no painel Supabase → SQL Editor, em ordem numérica.
 | `07_shifts_minutos_residuais.sql` | Adiciona `minutos_residuais` em shifts (para rollback em reimportação) |
 | `08_plantao_plus.sql` | Adiciona `tipo_solicitacao` e `data_plantao` em purchase_requests |
 | `09_unique_shift_employee_cycle.sql` | Constraint UNIQUE em shifts para evitar duplicatas por servidor/ciclo |
+| `12_fix_profiles_fkeys.sql` | Corrige chaves estrangeiras de `profiles` para `ON DELETE SET NULL` permitindo deleção de usuários |
 
 ---
 
@@ -571,3 +572,19 @@ npm run build
 - `database/09_unique_shift_employee_cycle.sql`
 - `UNIQUE(employee_id, cycle_id)` garante integridade a nível de banco
 - Script inclui limpeza de duplicatas pré-existentes
+
+**feat: Tela Global de Servidores (Admin)**
+- Criação da página `admin/Servidores.tsx` acessível via menu lateral
+- Tabela com paginação via banco (range do Supabase) para suportar grandes volumes de dados
+- Filtros implementados: Termo de busca (nome/matrícula), Estabelecimento Penal e Cargo
+- Adicionado painel superior dinâmico de estatísticas (Total e Quantidade por Cargo) que reage aos filtros aplicados
+
+**feat: Redirecionamento Inteligente de Detalhamento no Dashboard**
+- Refatorado o botão de visualização (olho) na tabela do Admin Dashboard
+- O botão não abre mais uma rota dedicada de unidade (Modal antigo), mas redireciona para a nova tela Global de Servidores (`/admin/servidores`) passando o ID do estabelecimento via Query Params (`?est_id=...`)
+- A tela Global intercepta a Query Param e aplica automaticamente o filtro do estabelecimento
+- O botão de "Gerar Relatório" individual da ação do Dashboard foi removido por redundância.
+
+**fix: Deleção de Usuários Bloqueada por Chave Estrangeira**
+- Criado script `database/12_fix_profiles_fkeys.sql` para alterar o comportamento de foreign keys.
+- Modificado comportamento de deleção (ON DELETE) nas tabelas `cycles`, `shifts`, `compensatory_days`, `purchase_requests` e `audit_logs` que referenciam a tabela `profiles` para `SET NULL` ao invés de barrar a exclusão.

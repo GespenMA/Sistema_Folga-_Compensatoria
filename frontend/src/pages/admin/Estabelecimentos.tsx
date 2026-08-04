@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 
 type PlanningLimit = {
@@ -45,6 +45,12 @@ export const Estabelecimentos: React.FC = () => {
   const [tipo, setTipo] = useState('Unidade prisional');
   const [localizacao, setLocalizacao] = useState('');
   const [complexidade, setComplexidade] = useState('');
+
+  // Estados de Filtro
+  const [filterNome, setFilterNome] = useState('');
+  const [filterTipo, setFilterTipo] = useState('');
+  const [filterLocalizacao, setFilterLocalizacao] = useState('');
+  const [filterComplexidade, setFilterComplexidade] = useState('');
   
   // Limites Planejados no Modal
   const [qtdInsp, setQtdInsp] = useState<number>(0);
@@ -52,6 +58,16 @@ export const Estabelecimentos: React.FC = () => {
   const [qtdAux, setQtdAux] = useState<number>(0);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Toast de notificação
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = useCallback((msg: string, type: 'success' | 'error' | 'warning' = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ msg, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
   useEffect(() => {
     fetchInitialData();
@@ -151,7 +167,7 @@ export const Estabelecimentos: React.FC = () => {
       const { error } = await supabase.from('establishments').delete().eq('id', id);
       if (error) {
         if (error.code === '23503') {
-           alert('Não é possível excluir. Este estabelecimento já possui histórico financeiro (Ciclos) ou usuários atrelados.');
+           showToast('Não é possível excluir. Este estabelecimento já possui histórico financeiro (Ciclos) ou usuários atrelados.', 'error');
         } else {
            throw error;
         }
@@ -159,7 +175,11 @@ export const Estabelecimentos: React.FC = () => {
         fetchEstabelecimentos();
       }
     } catch (err: any) {
-      alert(err.message || 'Erro ao excluir.');
+      if (err.message?.includes('row-level security') || err.code === '42501') {
+        showToast('Você não tem permissão para excluir estabelecimentos.', 'error');
+      } else {
+        showToast(err.message || 'Erro ao excluir.', 'error');
+      }
     }
   };
 
@@ -228,9 +248,14 @@ export const Estabelecimentos: React.FC = () => {
       }
 
       setIsModalOpen(false);
+      showToast('Estabelecimento salvo com sucesso!', 'success');
       fetchEstabelecimentos();
     } catch (err: any) {
-      alert(err.message || 'Ocorreu um erro ao salvar.');
+      if (err.message?.includes('row-level security') || err.code === '42501') {
+        showToast('Você não tem permissão para adicionar ou editar estabelecimentos.', 'error');
+      } else {
+        showToast(err.message || 'Ocorreu um erro ao salvar.', 'error');
+      }
       console.error(err);
     } finally {
       setIsSubmitting(false);
@@ -249,6 +274,75 @@ export const Estabelecimentos: React.FC = () => {
         <button className="btn btn-primary" onClick={openNewModal}>
           Novo Estabelecimento
         </button>
+      </div>
+
+      {/* Filtros */}
+      <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)', marginBottom: 'var(--space-6)', display: 'flex', gap: 'var(--space-4)', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        
+        <div style={{ flex: '1 1 200px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Estabelecimento Penal
+          </label>
+          <input 
+            type="text"
+            placeholder="Buscar por nome..."
+            value={filterNome} 
+            onChange={e => setFilterNome(e.target.value)}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          />
+        </div>
+
+        <div style={{ flex: '1 1 150px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Tipo
+          </label>
+          <select 
+            value={filterTipo} 
+            onChange={e => setFilterTipo(e.target.value)}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          >
+            <option value="">Todos</option>
+            <option value="Unidade prisional">Unidade prisional</option>
+            <option value="Unidade de apoio">Unidade de apoio</option>
+            <option value="Administrativo">Administrativo</option>
+          </select>
+        </div>
+
+        <div style={{ flex: '1 1 150px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Localização
+          </label>
+          <select 
+            value={filterLocalizacao} 
+            onChange={e => setFilterLocalizacao(e.target.value)}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          >
+            <option value="">Todas</option>
+            <option value="Capital">Capital</option>
+            <option value="Interior">Interior</option>
+            <option value="Capital - Complexo">Capital - Complexo</option>
+            <option value="Capital - Apoio">Capital - Apoio</option>
+          </select>
+        </div>
+
+        <div style={{ flex: '1 1 150px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Complexidade
+          </label>
+          <select 
+            value={filterComplexidade} 
+            onChange={e => setFilterComplexidade(e.target.value)}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          >
+            <option value="">Todas</option>
+            <option value="Baixa Complexidade">Baixa Complexidade</option>
+            <option value="Média Complexidade">Média Complexidade</option>
+            <option value="Média Alta Complexidade">Média Alta Complexidade</option>
+            <option value="Alta Complexidade">Alta Complexidade</option>
+            <option value="Especial">Especial</option>
+            <option value="Apoio">Apoio</option>
+          </select>
+        </div>
       </div>
 
       <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
@@ -277,7 +371,26 @@ export const Estabelecimentos: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {estabelecimentos.map(est => {
+                {estabelecimentos.filter((est) => {
+                  const matchNome = est.nome.toLowerCase().includes(filterNome.toLowerCase());
+                  const matchTipo = filterTipo ? est.tipo === filterTipo : true;
+                  const matchLocalizacao = filterLocalizacao ? est.localizacao === filterLocalizacao : true;
+                  const matchComplexidade = filterComplexidade ? est.complexidade === filterComplexidade : true;
+                  return matchNome && matchTipo && matchLocalizacao && matchComplexidade;
+                }).length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                      Nenhum estabelecimento corresponde aos filtros aplicados.
+                    </td>
+                  </tr>
+                ) : (
+                estabelecimentos.filter((est) => {
+                  const matchNome = est.nome.toLowerCase().includes(filterNome.toLowerCase());
+                  const matchTipo = filterTipo ? est.tipo === filterTipo : true;
+                  const matchLocalizacao = filterLocalizacao ? est.localizacao === filterLocalizacao : true;
+                  const matchComplexidade = filterComplexidade ? est.complexidade === filterComplexidade : true;
+                  return matchNome && matchTipo && matchLocalizacao && matchComplexidade;
+                }).map(est => {
                   // Pega os dados orçamentários do ciclo ativo correspondente
                   const currentCycleData = est.cycle_establishments?.find(ce => ce.cycle_id === activeCycleId);
                   
@@ -313,7 +426,8 @@ export const Estabelecimentos: React.FC = () => {
                       </td>
                     </tr>
                   );
-                })}
+                })
+                )}
               </tbody>
             </table>
           </div>
@@ -440,6 +554,27 @@ export const Estabelecimentos: React.FC = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+      {/* ─── Toast de Notificação ──────────────────────── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
+          background: toast.type === 'success' ? '#10b981' : toast.type === 'error' ? '#ef4444' : '#eab308',
+          color: '#fff', padding: '12px 20px', borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: '8px',
+          animation: 'slideIn 0.3s ease-out forwards'
+        }}>
+          <span>
+            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : '⚠️'}
+          </span>
+          <span style={{ fontSize: '13px', fontWeight: 600, lineHeight: 1.4 }}>{toast.msg}</span>
+          <button 
+            onClick={() => setToast(null)}
+            style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', marginLeft: '12px', padding: '4px' }}
+          >
+            ✕
+          </button>
         </div>
       )}
 

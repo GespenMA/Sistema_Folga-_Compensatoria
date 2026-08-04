@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Building2, FileBadge, BarChart3, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, X, Calendar, PlayCircle } from 'lucide-react';
+import { LayoutDashboard, Building2, FileBadge, BarChart3, Settings, LogOut, ChevronLeft, ChevronRight, Menu, ShieldAlert, X, Calendar, PlayCircle, Contact } from 'lucide-react';
 
 export const AdminLayout: React.FC = () => {
   const { profile, signOut } = useAuth();
@@ -98,6 +98,9 @@ export const AdminLayout: React.FC = () => {
             {!isCollapsed && <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', marginTop: '24px', marginBottom: '12px', fontWeight: 600 }}>Operação</div>}
             <NavLink to="/admin/estabelecimentos" style={getLinkStyle} title="Estabelecimentos" onClick={() => setIsMobileMenuOpen(false)}>
               <Building2 size={20} /> {!isCollapsed && "Estabelecimentos"}
+            </NavLink>
+            <NavLink to="/admin/servidores" style={getLinkStyle} title="Servidores" onClick={() => setIsMobileMenuOpen(false)}>
+              <Contact size={20} /> {!isCollapsed && "Servidores"}
             </NavLink>
             
             {!isCollapsed && <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: '#64748b', marginTop: '24px', marginBottom: '12px', fontWeight: 600 }}>Solicitações</div>}
