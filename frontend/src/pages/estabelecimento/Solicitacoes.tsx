@@ -32,7 +32,7 @@ type Solicitacao = {
   employees: {
     nome: string;
     matricula: string;
-    positions: { codigo: string };
+    positions: { nome: string; codigo: string };
   };
 };
 
@@ -123,7 +123,7 @@ export const Solicitacoes: React.FC = () => {
           .select(`
             id, valor, status, justificativa, requested_at, tipo_solicitacao, data_plantao,
             compensatory_days (periodo_inicio, periodo_fim, quantidade_plantoes),
-            employees (nome, matricula, positions(codigo))
+            employees (nome, matricula, positions(nome, codigo))
           `)
           .eq('cycle_id', cycleData.id)
           .eq('establishment_id', profile!.establishment_id)
@@ -676,9 +676,9 @@ export const Solicitacoes: React.FC = () => {
                           }}
                         />
                         <div>
-                          <strong>{f.employees.nome}</strong>
+                          <strong>{f.employees.nome} ({f.employees.matricula})</strong>
                           <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                            {f.employees.positions.codigo} | {f.quantidade_plantoes} plantões
+                            {f.employees.positions.nome} | {f.quantidade_plantoes} plantões
                           </div>
                         </div>
                       </div>
@@ -783,8 +783,8 @@ export const Solicitacoes: React.FC = () => {
                       )}
                     </td>
                     <td style={{ padding: 'var(--space-3)' }}>
-                      <div style={{ fontWeight: 500 }}>{sol.employees?.nome}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{sol.employees?.positions?.codigo}</div>
+                      <div style={{ fontWeight: 500 }}>{sol.employees?.nome} ({sol.employees?.matricula})</div>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{sol.employees?.positions?.nome}</div>
                     </td>
                     <td style={{ padding: 'var(--space-3)' }}>
                       {sol.tipo_solicitacao === 'PLANTAO_PLUS' ? (

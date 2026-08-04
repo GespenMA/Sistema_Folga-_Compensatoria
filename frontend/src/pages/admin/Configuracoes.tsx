@@ -16,6 +16,7 @@ type ProfileUser = {
   email: string;
   perfil: string;
   ativo: boolean;
+  establishment_id?: string | null;
 };
 
 export const Configuracoes: React.FC = () => {
@@ -28,6 +29,7 @@ export const Configuracoes: React.FC = () => {
 
   // Estados para Modal Usuário
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [userEditId, setUserEditId] = useState<string | null>(null);
   const [userNome, setUserNome] = useState('');
   const [userEmail, setUserEmail] = useState('');
   const [userSenha, setUserSenha] = useState('');
@@ -240,6 +242,7 @@ export const Configuracoes: React.FC = () => {
   };
 
   const openUserModal = () => {
+    setUserEditId(null);
     setUserNome('');
     setUserEmail('');
     setUserSenha('');
@@ -248,52 +251,88 @@ export const Configuracoes: React.FC = () => {
     setIsUserModalOpen(true);
   };
 
+  const openEditUserModal = (user: ProfileUser) => {
+    setUserEditId(user.id);
+    setUserNome(user.nome);
+    setUserEmail(user.email);
+    setUserSenha(''); 
+    setUserPerfil(user.perfil);
+    setUserEstId(user.establishment_id || '');
+    setIsUserModalOpen(true);
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    if (!window.confirm('Tem certeza que deseja excluir o perfil deste usuário? Ele perderá o acesso ao sistema.')) return;
+    try {
+      const { error } = await supabase.from('profiles').delete().eq('id', id);
+      if (error) throw error;
+      fetchUsuarios();
+      setAlertMessage({ title: 'Sucesso', msg: 'Perfil excluído com sucesso!', type: 'success' });
+    } catch (err: any) {
+      setAlertMessage({ title: 'Erro', msg: err.message || 'Erro ao excluir perfil.', type: 'error' });
+    }
+  };
+
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (userPerfil === 'ESTABELECIMENTO' && !userEstId) {
       alert('Selecione o estabelecimento penal.');
       return;
     }
-    if (userSenha.length < 6) {
-      alert('A senha deve ter no mínimo 6 caracteres.');
-      return;
-    }
 
     setIsSubmittingUser(true);
     try {
-      // Usamos um cliente temporário sem persistência para não deslogar o admin atual
-      const { createClient } = await import('@supabase/supabase-js');
-      const tempClient = createClient(
-        import.meta.env.VITE_SUPABASE_URL,
-        import.meta.env.VITE_SUPABASE_ANON_KEY,
-        { auth: { persistSession: false, autoRefreshToken: false } }
-      );
+      if (userEditId) {
+        // Edit flow
+        const { error: profileError } = await supabase.from('profiles').update({
+          nome: userNome,
+          perfil: userPerfil,
+          establishment_id: userPerfil === 'ESTABELECIMENTO' ? userEstId : null,
+        }).eq('id', userEditId);
 
-      const { data: authData, error: authError } = await tempClient.auth.signUp({
-        email: userEmail,
-        password: userSenha,
-      });
+        if (profileError) throw profileError;
+        setAlertMessage({ title: 'Sucesso', msg: 'Usuário atualizado com sucesso!', type: 'success' });
+      } else {
+        // Create flow
+        if (userSenha.length < 6) {
+          alert('A senha deve ter no mínimo 6 caracteres.');
+          setIsSubmittingUser(false);
+          return;
+        }
 
-      if (authError) throw authError;
+        const { createClient } = await import('@supabase/supabase-js');
+        const tempClient = createClient(
+          import.meta.env.VITE_SUPABASE_URL,
+          import.meta.env.VITE_SUPABASE_ANON_KEY,
+          { auth: { persistSession: false, autoRefreshToken: false } }
+        );
 
-      const userId = authData.user?.id;
-      if (!userId) throw new Error('Falha ao gerar ID do usuário.');
+        const { data: authData, error: authError } = await tempClient.auth.signUp({
+          email: userEmail,
+          password: userSenha,
+        });
 
-      // Faz um upsert porque a trigger do BD pode já ter criado a linha vazia no profiles
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: userId,
-        nome: userNome,
-        email: userEmail,
-        perfil: userPerfil,
-        establishment_id: userPerfil === 'ESTABELECIMENTO' ? userEstId : null,
-      });
+        if (authError) throw authError;
 
-      if (profileError) throw profileError;
+        const userId = authData.user?.id;
+        if (!userId) throw new Error('Falha ao gerar ID do usuário.');
+
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: userId,
+          nome: userNome,
+          email: userEmail,
+          perfil: userPerfil,
+          establishment_id: userPerfil === 'ESTABELECIMENTO' ? userEstId : null,
+        });
+
+        if (profileError) throw profileError;
+        setAlertMessage({ title: 'Sucesso', msg: 'Usuário cadastrado com sucesso!', type: 'success' });
+      }
 
       setIsUserModalOpen(false);
       fetchUsuarios();
     } catch (err: any) {
-      alert(err.message || 'Erro ao cadastrar usuário.');
+      setAlertMessage({ title: 'Erro', msg: err.message || 'Erro ao salvar usuário.', type: 'error' });
     } finally {
       setIsSubmittingUser(false);
     }
@@ -692,8 +731,10 @@ export const Configuracoes: React.FC = () => {
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                       {user.ativo ? <span className="tag" style={{ background: 'var(--color-accent-500)', color: 'white' }}>Ativo</span> : <span className="tag tag-outline">Inativo</span>}
                     </td>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right' }}>
-                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleResetPassword(user.email)}>📧 Redefinir Senha</button>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleResetPassword(user.email)}>📧 Senha</button>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => openEditUserModal(user)}>✏️ Editar</button>
+                      <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px', color: 'var(--color-danger)' }} onClick={() => handleDeleteUser(user.id)}>🗑️ Excluir</button>
                     </td>
                   </tr>
                 ))}
@@ -979,7 +1020,9 @@ export const Configuracoes: React.FC = () => {
         }}>
           <div className="blueprint card elev-md" style={{ width: '450px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
             <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
-            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>Cadastrar Novo Usuário</h3>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>
+              {userEditId ? 'Editar Usuário' : 'Cadastrar Novo Usuário'}
+            </h3>
             
             <form onSubmit={handleSaveUser}>
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
@@ -989,13 +1032,16 @@ export const Configuracoes: React.FC = () => {
 
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
                 <label>E-mail *</label>
-                <input className="input" type="email" value={userEmail} onChange={e => setUserEmail(e.target.value)} required />
+                <input className="input" type="email" value={userEmail} onChange={e => setUserEmail(e.target.value)} required disabled={!!userEditId} />
+                {userEditId && <small style={{ color: 'var(--color-text-muted)' }}>O e-mail não pode ser alterado por aqui.</small>}
               </div>
 
-              <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
-                <label>Senha (mín. 6 caracteres) *</label>
-                <input className="input" type="password" value={userSenha} onChange={e => setUserSenha(e.target.value)} minLength={6} required />
-              </div>
+              {!userEditId && (
+                <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
+                  <label>Senha (mín. 6 caracteres) *</label>
+                  <input className="input" type="password" value={userSenha} onChange={e => setUserSenha(e.target.value)} minLength={6} required />
+                </div>
+              )}
 
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
                 <label>Perfil de Acesso *</label>
@@ -1022,7 +1068,7 @@ export const Configuracoes: React.FC = () => {
                 <button type="button" className="btn btn-ghost" onClick={() => setIsUserModalOpen(false)}>Cancelar</button>
                 <button type="submit" className="btn btn-primary blueprint" disabled={isSubmittingUser}>
                   <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
-                  {isSubmittingUser ? 'Criando...' : 'Cadastrar'}
+                  {isSubmittingUser ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
             </form>

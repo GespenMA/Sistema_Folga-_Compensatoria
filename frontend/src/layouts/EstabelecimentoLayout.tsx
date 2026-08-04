@@ -130,7 +130,7 @@ export const EstabelecimentoLayout: React.FC = () => {
              </div>
              {!isCollapsed && (
                <div style={{ flex: 1, minWidth: 0 }}>
-                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile?.nome}</div>
+                 <div style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', lineHeight: 1.2, marginBottom: '2px', wordBreak: 'break-word' }}>{profile?.nome}</div>
                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>Diretor / Escalante</div>
                </div>
              )}
