@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useSearchParams } from 'react-router-dom';
 import { BadgeCheck, ChevronLeft, ChevronRight, Search } from 'lucide-react';
@@ -43,6 +43,25 @@ export const Servidores: React.FC = () => {
   
   // Paginação
   const [page, setPage] = useState(1);
+  
+  // Custom Dropdown State for Estabelecimento Penal
+  const [isEstDropdownOpen, setIsEstDropdownOpen] = useState(false);
+  const [estSearch, setEstSearch] = useState('');
+  const estDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (estDropdownRef.current && !estDropdownRef.current.contains(event.target as Node)) {
+        setIsEstDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredEsts = useMemo(() => {
+    return establishments.filter(e => e.nome.toLowerCase().includes(estSearch.toLowerCase()));
+  }, [establishments, estSearch]);
   
   // Estatísticas
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -198,18 +217,55 @@ export const Servidores: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ flex: '1 1 200px' }}>
+        <div style={{ flex: '1 1 200px', position: 'relative' }} ref={estDropdownRef}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
             Estabelecimento Penal
           </label>
-          <select 
-            value={selectedEst} 
-            onChange={(e) => setSelectedEst(e.target.value)} 
-            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          
+          <div 
+            onClick={() => { setIsEstDropdownOpen(true); setEstSearch(''); }}
+            style={{ width: '100%', height: '38px', padding: '0 10px', borderRadius: '8px', border: '1px solid var(--color-border)', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
           >
-            <option value="">Todos os Estabelecimentos</option>
-            {establishments.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
-          </select>
+            {isEstDropdownOpen ? (
+              <input 
+                autoFocus
+                type="text" 
+                value={estSearch}
+                onChange={e => setEstSearch(e.target.value)}
+                placeholder="Buscar unidade..."
+                style={{ border: 'none', outline: 'none', width: '100%', fontSize: '14px', background: 'transparent', padding: 0 }}
+              />
+            ) : (
+              <span style={{ color: selectedEst ? 'var(--color-text-base)' : 'var(--color-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '14px' }}>
+                {selectedEst ? establishments.find(e => e.id === selectedEst)?.nome : 'Todos os Estabelecimentos'}
+              </span>
+            )}
+          </div>
+
+          {isEstDropdownOpen && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid var(--color-border)', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', zIndex: 10, maxHeight: '250px', overflowY: 'auto' }}>
+              <div 
+                onClick={() => { setSelectedEst(''); setIsEstDropdownOpen(false); }}
+                style={{ padding: '10px 12px', fontSize: '14px', cursor: 'pointer', background: selectedEst === '' ? 'var(--color-bg-elevated)' : 'transparent', borderBottom: '1px solid var(--color-border)', fontWeight: selectedEst === '' ? 600 : 400 }}
+              >
+                Todos os Estabelecimentos
+              </div>
+              {filteredEsts.map(e => (
+                <div 
+                  key={e.id}
+                  onClick={() => { setSelectedEst(e.id); setIsEstDropdownOpen(false); }}
+                  style={{ padding: '10px 12px', fontSize: '14px', cursor: 'pointer', background: selectedEst === e.id ? 'var(--color-bg-elevated)' : 'transparent', borderBottom: '1px solid var(--color-border)', fontWeight: selectedEst === e.id ? 600 : 400 }}
+                  onMouseEnter={ev => ev.currentTarget.style.background = 'var(--color-bg-elevated)'}
+                  onMouseLeave={ev => ev.currentTarget.style.background = selectedEst === e.id ? 'var(--color-bg-elevated)' : 'transparent'}
+                >
+                  {e.nome}
+                </div>
+              ))}
+              {filteredEsts.length === 0 && (
+                <div style={{ padding: '10px 12px', fontSize: '14px', color: 'var(--color-text-muted)', textAlign: 'center' }}>Nenhuma unidade encontrada</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: '1 1 200px' }}>

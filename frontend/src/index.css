@@ -773,6 +773,52 @@ textarea.input { min-height: 90px; resize: vertical; }
   }
   .desktop-only { display: none !important; }
   .mobile-only { display: flex !important; }
+
+  /* Responsive Tables (Card View) */
+  .responsive-table, .responsive-table tbody, .responsive-table tr, .responsive-table td {
+    display: block;
+    width: 100%;
+  }
+  .responsive-table thead {
+    display: none;
+  }
+  .responsive-table tr {
+    margin-bottom: var(--space-4);
+    background: var(--color-surface);
+    border: 1px solid var(--color-divider);
+    border-radius: var(--radius-md);
+    padding: var(--space-2);
+  }
+  .responsive-table tr:last-child {
+    margin-bottom: 0;
+  }
+  .responsive-table td {
+    position: relative;
+    padding: var(--space-2) var(--space-2) var(--space-2) 45% !important;
+    min-height: 40px;
+    border: none !important;
+    border-bottom: 1px solid var(--color-divider) !important;
+    text-align: right !important;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+  }
+  .responsive-table td:last-child {
+    border-bottom: none !important;
+  }
+  .responsive-table td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: var(--space-3);
+    top: 50%;
+    transform: translateY(-50%);
+    width: 40%;
+    font-weight: 600;
+    text-align: left;
+    color: var(--color-text-muted);
+    font-size: 13px;
+  }
+
 }
 .mobile-header-bar { display: none; }
 .app-sidebar-backdrop { display: none; }

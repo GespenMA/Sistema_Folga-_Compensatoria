@@ -125,7 +125,7 @@ export const Solicitacoes: React.FC = () => {
         
         if (folgas) setFolgasDisponiveis(folgas as unknown as FolgaDisponivel[]);
 
-        // 3. Busca solicitações já feitas no ciclo (PENDENTE, APROVADA, REJEITADA)
+        // 3. Busca solicitações já feitas no ciclo (SOLICITADA, APROVADA, REJEITADA)
         const { data: sols } = await supabase
           .from('purchase_requests')
           .select(`
@@ -153,7 +153,7 @@ export const Solicitacoes: React.FC = () => {
           .reduce((acc, curr) => acc + Number(curr.valor), 0);
 
         const empenhado = (sols || [])
-          .filter(s => s.status === 'SOLICITADA' || s.status === 'PENDENTE')
+          .filter(s => s.status === 'SOLICITADA')
           .reduce((acc, curr) => acc + Number(curr.valor), 0);
           
         setTotalOrcado(orcado);
@@ -594,9 +594,9 @@ export const Solicitacoes: React.FC = () => {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 'var(--space-6)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-6)' }}>
         {/* Lado Esquerdo: Saldo e Folgas Disponíveis */}
-        <div>
+        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
           <div className="blueprint card elev-sm" style={{ padding: 'var(--space-4)', marginBottom: 'var(--space-4)', background: 'var(--color-surface)' }}>
              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
                <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>Total Orçado</div>
@@ -648,7 +648,7 @@ export const Solicitacoes: React.FC = () => {
             return (
               <>
                 {folgasDisponiveis.length > 0 && (
-                  <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '16px', alignItems: 'center' }}>
                     <div style={{ marginRight: '8px', display: 'flex', alignItems: 'center' }}>
                       <input 
                         type="checkbox"
@@ -677,7 +677,7 @@ export const Solicitacoes: React.FC = () => {
                     />
                     <select
                       className="input"
-                      style={{ width: '200px' }}
+                      style={{ flex: '1 1 150px', minWidth: '150px' }}
                       value={filtroCargoFolga}
                       onChange={e => setFiltroCargoFolga(e.target.value)}
                     >
@@ -760,7 +760,7 @@ export const Solicitacoes: React.FC = () => {
           const paginatedSolicitacoes = solicitacoes.slice((currentPageSolicitacoes - 1) * ITEMS_PER_PAGE, currentPageSolicitacoes * ITEMS_PER_PAGE);
 
           return (
-            <div>
+            <div style={{ flex: '2 1 500px', minWidth: 0 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
             <h3 style={{ margin: 0 }}>Solicitações do Ciclo</h3>
             {selectedRequests.length > 0 && (
@@ -773,8 +773,19 @@ export const Solicitacoes: React.FC = () => {
               </button>
             )}
           </div>
-          <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+          <div style={{ marginBottom: 'var(--space-4)', padding: '12px 16px', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '4px', color: '#92400e', fontSize: '13px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '2px' }}>
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+              <path d="M12 9v4" />
+              <path d="M12 17h.01" />
+            </svg>
+            <div>
+              <strong style={{ display: 'block', marginBottom: '4px', fontSize: '14px' }}>Atenção aos Pagamentos</strong>
+              Apenas as solicitações com status de <strong>"Aprovada"</strong> serão processadas para pagamento na folha. Compete à <strong>Direção do Estabelecimento Penal</strong> realizar essa aprovação das pendências na tabela abaixo.
+            </div>
+          </div>
+          <div className="blueprint card elev-sm" style={{ overflowX: 'auto' }}>
+            <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
                   <th style={{ padding: 'var(--space-3)', width: '40px' }}>
@@ -792,6 +803,7 @@ export const Solicitacoes: React.FC = () => {
                   </th>
                   <th style={{ padding: 'var(--space-3)' }}>Servidor</th>
                   <th style={{ padding: 'var(--space-3)' }}>Tipo / Qtd.</th>
+                  <th style={{ padding: 'var(--space-3)' }}>Data do Plantão</th>
                   <th style={{ padding: 'var(--space-3)' }}>Valor Solicitado</th>
                   <th style={{ padding: 'var(--space-3)' }}>Status</th>
                   <th style={{ padding: 'var(--space-3)', textAlign: 'right' }}>Ações</th>
@@ -800,13 +812,13 @@ export const Solicitacoes: React.FC = () => {
               <tbody>
                 {solicitacoes.length === 0 ? (
                   <tr>
-                    <td colSpan={6} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                    <td colSpan={7} data-label="" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                       Nenhuma solicitação de compra feita neste ciclo.
                     </td>
                   </tr>
                 ) : paginatedSolicitacoes.map(sol => (
                   <tr key={sol.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
-                    <td style={{ padding: 'var(--space-3)' }}>
+                    <td data-label="" style={{ padding: 'var(--space-3)' }}>
                       {sol.status === 'SOLICITADA' && (
                         <input 
                           type="checkbox" 
@@ -821,27 +833,25 @@ export const Solicitacoes: React.FC = () => {
                         />
                       )}
                     </td>
-                    <td style={{ padding: 'var(--space-3)' }}>
+                    <td data-label="Servidor" style={{ padding: 'var(--space-3)' }}>
                       <div style={{ fontWeight: 500 }}>{sol.employees?.nome} ({sol.employees?.matricula})</div>
                       <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{sol.employees?.positions?.nome}</div>
                     </td>
-                    <td style={{ padding: 'var(--space-3)' }}>
+                    <td data-label="Tipo / Qtd." style={{ padding: 'var(--space-3)' }}>
                       {sol.tipo_solicitacao === 'PLANTAO_PLUS' ? (
-                        <div>
-                          <span style={{ fontSize: '11px', background: 'var(--color-primary)', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>
-                            PL. PLUS
-                          </span>
-                          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                            {sol.data_plantao ? new Date(sol.data_plantao + 'T12:00:00Z').toLocaleDateString('pt-BR') : ''}
-                          </div>
-                        </div>
+                        <span style={{ fontSize: '11px', background: 'var(--color-primary)', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>
+                          PL. PLUS
+                        </span>
                       ) : (
-                        sol.compensatory_days?.quantidade_plantoes + ' folga(s)'
+                        <span>{sol.compensatory_days?.quantidade_plantoes + ' folga(s)'}</span>
                       )}
                     </td>
-                    <td style={{ padding: 'var(--space-3)', fontWeight: 600 }}>R$ {Number(sol.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td style={{ padding: 'var(--space-3)' }}>{getStatusBadge(sol.status)}</td>
-                    <td style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
+                    <td data-label="Data do Plantão" style={{ padding: 'var(--space-3)', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                      {sol.data_plantao ? new Date(sol.data_plantao + 'T12:00:00Z').toLocaleDateString('pt-BR') : '—'}
+                    </td>
+                    <td data-label="Valor" style={{ padding: 'var(--space-3)', fontWeight: 600 }}>R$ {Number(sol.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
+                    <td data-label="Status" style={{ padding: 'var(--space-3)' }}>{getStatusBadge(sol.status)}</td>
+                    <td data-label="Ações" style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
                         {sol.status === 'SOLICITADA' && (
                           <>

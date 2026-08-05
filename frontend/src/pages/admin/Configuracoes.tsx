@@ -482,7 +482,7 @@ export const Configuracoes: React.FC = () => {
       // rows[0] é o cabeçalho
       const MINUTOS_POR_PLANTAO = 720; // 12h
       const preview: PreviewRow[] = rows.slice(1).filter(r => r[0]).map(r => {
-        const rawTrabalhadas = r[5] !== undefined ? r[5] : '0:00';
+        const rawTrabalhadas = r[6] !== undefined ? r[6] : '0:00';
         const trabalhadas = String(rawTrabalhadas);
         const minutosNovos = parseHorasMinutos(rawTrabalhadas);
         // O preview mostra o cálculo só das horas novas (sem saldo anterior)

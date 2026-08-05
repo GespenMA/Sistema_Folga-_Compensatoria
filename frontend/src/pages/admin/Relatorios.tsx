@@ -23,13 +23,17 @@ type OrcadoGastoRow = {
 
 // Rel 2: Detalhamento por Estabelecimento
 type DetalhEstRow = {
+  id: string;
   establishment_id: string;
   nome_est: string;
   position_codigo: string;
   nome_cargo: string;
-  qtd_folga_comp: number;
-  qtd_plantao_plus: number;
-  total_aprovado: number;
+  matricula: string;
+  nome_servidor: string;
+  tipo_solicitacao: string;
+  data_detalhe: string;
+  justificativa: string;
+  valor_aprovado: number;
 };
 
 // Rel 3: Folha por Servidor
@@ -41,6 +45,7 @@ type FolhaServidorRow = {
   cargo_nome: string;
   establishment_id: string;
   nome_est: string;
+  minutos_trabalhados: number;
   plantoes_trabalhados: number;
   folgas_geradas: number;
   folgas_compradas_qtd: number;
@@ -58,6 +63,22 @@ type ActiveTab = 'orcado_gasto' | 'detalhe_est' | 'folha_servidor';
 // =============================================
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
+
+const fetchAll = async (query: any) => {
+  let allData: any[] = [];
+  let from = 0;
+  const step = 1000;
+  while (true) {
+    const { data, error } = await query.range(from, from + step - 1);
+    if (error) throw error;
+    if (data && data.length > 0) {
+      allData = allData.concat(data);
+    }
+    if (!data || data.length < step) break;
+    from += step;
+  }
+  return allData;
+};
 
 // =============================================
 // COMPONENTE PRINCIPAL
@@ -81,6 +102,29 @@ export const Relatorios: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exportingPdf, setExportingPdf] = useState(false);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPageDetalh, setCurrentPageDetalh] = useState(1);
+  const itemsPerPage = 20;
+
+  // Custom Dropdown State for Estabelecimento Penal
+  const [isEstDropdownOpen, setIsEstDropdownOpen] = useState(false);
+  const [estSearch, setEstSearch] = useState('');
+  const estDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (estDropdownRef.current && !estDropdownRef.current.contains(event.target as Node)) {
+        setIsEstDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredEsts = useMemo(() => {
+    return establishments.filter(e => e.nome.toLowerCase().includes(estSearch.toLowerCase()));
+  }, [establishments, estSearch]);
 
   // Carrega filtros iniciais
   useEffect(() => {
@@ -145,8 +189,7 @@ export const Relatorios: React.FC = () => {
       .select('id, total_orcado, establishment_id, establishments ( nome )')
       .eq('cycle_id', selectedCycle);
     if (selectedEst) ceQuery = ceQuery.eq('establishment_id', selectedEst);
-    const { data: ceData, error: ceErr } = await ceQuery;
-    if (ceErr) throw ceErr;
+    const ceData = await fetchAll(ceQuery);
 
     // Busca purchase_requests aprovadas e solicitadas para este ciclo
     let prQuery = supabase
@@ -155,8 +198,7 @@ export const Relatorios: React.FC = () => {
       .eq('cycle_id', selectedCycle)
       .in('status', ['APROVADA', 'SOLICITADA']);
     if (selectedEst) prQuery = prQuery.eq('establishment_id', selectedEst);
-    const { data: prData, error: prErr } = await prQuery;
-    if (prErr) throw prErr;
+    const prData = await fetchAll(prQuery);
 
     // Agrupa
     const rows: OrcadoGastoRow[] = (ceData || []).map((ce: any) => {
@@ -188,35 +230,36 @@ export const Relatorios: React.FC = () => {
   const loadDetalhEstabelecimento = async () => {
     let q = supabase
       .from('purchase_requests')
-      .select('establishment_id, valor, status, tipo_solicitacao, establishments ( nome ), positions ( codigo, nome )')
+      .select('id, establishment_id, valor, status, tipo_solicitacao, data_plantao, justificativa, establishments ( nome ), positions ( codigo, nome ), employees ( matricula, nome ), compensatory_days ( periodo_inicio, periodo_fim )')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'APROVADA');
     if (selectedEst) q = q.eq('establishment_id', selectedEst);
     if (selectedCargo) q = q.eq('position_id', selectedCargo);
-    const { data, error } = await q;
-    if (error) throw error;
+    const data = await fetchAll(q);
 
-    // Agrupa por est + cargo
-    const map = new Map<string, DetalhEstRow>();
-    for (const row of data || []) {
-      const key = `${row.establishment_id}|${(row.positions as any)?.codigo || ''}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          establishment_id: row.establishment_id,
-          nome_est: (row.establishments as any)?.nome || '—',
-          position_codigo: (row.positions as any)?.codigo || '—',
-          nome_cargo: (row.positions as any)?.nome || '—',
-          qtd_folga_comp: 0,
-          qtd_plantao_plus: 0,
-          total_aprovado: 0,
-        });
+    const rows: DetalhEstRow[] = (data || []).map((row: any) => {
+      let data_detalhe = '—';
+      if (row.data_plantao) {
+        data_detalhe = new Date(row.data_plantao + 'T12:00:00').toLocaleDateString('pt-BR');
+      } else if (row.tipo_solicitacao === 'FOLGA_COMPENSATORIA' && row.compensatory_days) {
+        data_detalhe = `${new Date(row.compensatory_days.periodo_inicio + 'T12:00:00').toLocaleDateString('pt-BR')} a ${new Date(row.compensatory_days.periodo_fim + 'T12:00:00').toLocaleDateString('pt-BR')}`;
       }
-      const entry = map.get(key)!;
-      entry.total_aprovado += Number(row.valor);
-      if (row.tipo_solicitacao === 'PLANTAO_PLUS') entry.qtd_plantao_plus++;
-      else entry.qtd_folga_comp++;
-    }
-    const rows = Array.from(map.values()).sort((a, b) => a.nome_est.localeCompare(b.nome_est) || a.nome_cargo.localeCompare(b.nome_cargo));
+      
+      return {
+        id: row.id,
+        establishment_id: row.establishment_id,
+        nome_est: row.establishments?.nome || '—',
+        position_codigo: row.positions?.codigo || '—',
+        nome_cargo: row.positions?.nome || '—',
+        matricula: row.employees?.matricula || '—',
+        nome_servidor: row.employees?.nome || '—',
+        tipo_solicitacao: row.tipo_solicitacao,
+        data_detalhe,
+        justificativa: row.justificativa || '—',
+        valor_aprovado: Number(row.valor) || 0,
+      };
+    });
+    rows.sort((a, b) => a.nome_est.localeCompare(b.nome_est) || a.nome_servidor.localeCompare(b.nome_servidor));
     setDetalhEstData(rows);
   };
 
@@ -227,19 +270,17 @@ export const Relatorios: React.FC = () => {
     // 1. Busca shifts no ciclo (plantões trabalhados)
     let shiftQ = supabase
       .from('shifts')
-      .select('employee_id, quantidade_plantoes, employees ( id, matricula, nome, saldo_minutos, establishment_id, establishments ( nome ), positions ( codigo, nome ) )')
+      .select('employee_id, quantidade_plantoes, minutos_residuais, employees ( id, matricula, nome, saldo_minutos, establishment_id, establishments ( nome ), positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle);
     if (selectedEst) shiftQ = shiftQ.eq('employees.establishment_id', selectedEst);
-    const { data: shiftData, error: shiftErr } = await shiftQ;
-    if (shiftErr) throw shiftErr;
+    const shiftData = await fetchAll(shiftQ);
 
     // 2. Busca compensatory_days (folgas geradas)
     let compQ = supabase
       .from('compensatory_days')
       .select('employee_id, status, quantidade_plantoes')
       .eq('cycle_id', selectedCycle);
-    const { data: compData, error: compErr } = await compQ;
-    if (compErr) throw compErr;
+    const compData = await fetchAll(compQ);
 
     // 3. Busca purchase_requests aprovadas
     let prQ = supabase
@@ -249,8 +290,7 @@ export const Relatorios: React.FC = () => {
       .eq('status', 'APROVADA');
     if (selectedEst) prQ = prQ.eq('establishment_id', selectedEst);
     if (selectedCargo) prQ = prQ.eq('position_id', selectedCargo);
-    const { data: prData, error: prErr } = await prQ;
-    if (prErr) throw prErr;
+    const prData = await fetchAll(prQ);
 
     // Agrupa por funcionário
     const empMap = new Map<string, FolhaServidorRow>();
@@ -270,6 +310,7 @@ export const Relatorios: React.FC = () => {
           cargo_nome: emp.positions?.nome || '',
           establishment_id: emp.establishment_id || '',
           nome_est: emp.establishments?.nome || '',
+          minutos_trabalhados: 0,
           plantoes_trabalhados: 0,
           folgas_geradas: 0,
           folgas_compradas_qtd: 0,
@@ -280,7 +321,8 @@ export const Relatorios: React.FC = () => {
           saldo_minutos: emp.saldo_minutos || 0,
         });
       }
-      empMap.get(empId)!.plantoes_trabalhados += Number(s.quantidade_plantoes);
+      empMap.get(empId)!.plantoes_trabalhados += Number(s.quantidade_plantoes || 0);
+      empMap.get(empId)!.minutos_trabalhados += (Number(s.quantidade_plantoes || 0) * 720) + Number(s.minutos_residuais || 0);
     }
 
     // Processa compensatory_days
@@ -326,6 +368,29 @@ export const Relatorios: React.FC = () => {
     return folhaData.filter(r => r.nome.toLowerCase().includes(q) || r.matricula.toLowerCase().includes(q));
   }, [folhaData, searchServidor]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [folhaFiltered]);
+
+  const folhaPaginated = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return folhaFiltered.slice(startIndex, startIndex + itemsPerPage);
+  }, [folhaFiltered, currentPage]);
+
+  const totalPages = Math.ceil(folhaFiltered.length / itemsPerPage);
+
+  // Pagination Detalhamento
+  useEffect(() => {
+    setCurrentPageDetalh(1);
+  }, [detalhEstData]);
+
+  const detalhPaginated = useMemo(() => {
+    const startIndex = (currentPageDetalh - 1) * itemsPerPage;
+    return detalhEstData.slice(startIndex, startIndex + itemsPerPage);
+  }, [detalhEstData, currentPageDetalh]);
+
+  const totalPagesDetalh = Math.ceil(detalhEstData.length / itemsPerPage);
+
   // -------------------------------------------
   // KPIs
   // -------------------------------------------
@@ -345,9 +410,9 @@ export const Relatorios: React.FC = () => {
   }, [folhaFiltered]);
 
   const kpiDetalh = useMemo(() => {
-    const totalAprovado = detalhEstData.reduce((s, r) => s + r.total_aprovado, 0);
-    const totalFolgas = detalhEstData.reduce((s, r) => s + r.qtd_folga_comp, 0);
-    const totalPlus = detalhEstData.reduce((s, r) => s + r.qtd_plantao_plus, 0);
+    const totalAprovado = detalhEstData.reduce((s, r) => s + r.valor_aprovado, 0);
+    const totalFolgas = detalhEstData.filter(r => r.tipo_solicitacao === 'FOLGA_COMPENSATORIA').length;
+    const totalPlus = detalhEstData.filter(r => r.tipo_solicitacao === 'PLANTAO_PLUS').length;
     return { totalAprovado, totalFolgas, totalPlus };
   }, [detalhEstData]);
 
@@ -374,11 +439,13 @@ export const Relatorios: React.FC = () => {
     } else if (activeTab === 'detalhe_est') {
       const rows = detalhEstData.map(r => ({
         'Estabelecimento Penal': r.nome_est,
+        'Servidor': r.nome_servidor,
+        'Matrícula': r.matricula,
         'Cargo': r.nome_cargo,
-        'Cód. Cargo': r.position_codigo,
-        'Qtd. Folgas Compensatórias': r.qtd_folga_comp,
-        'Qtd. Plantão Plus': r.qtd_plantao_plus,
-        'Total Aprovado (R$)': r.total_aprovado,
+        'Tipo': r.tipo_solicitacao === 'PLANTAO_PLUS' ? 'Plantão Plus' : 'Folga Compensatória',
+        'Data / Período': r.data_detalhe,
+        'Justificativa': r.justificativa,
+        'Valor Aprovado (R$)': r.valor_aprovado,
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, 'Detalhe por Estabelecimento');
@@ -388,6 +455,7 @@ export const Relatorios: React.FC = () => {
         'Nome do Servidor': r.nome,
         'Cargo': r.cargo_nome,
         'Estabelecimento Penal': r.nome_est,
+        'Horas Trabalhadas': `${Math.floor(r.minutos_trabalhados / 60)}h${(r.minutos_trabalhados % 60).toString().padStart(2, '0')}`,
         'Plantões Trabalhados': r.plantoes_trabalhados,
         'Folgas Geradas': r.folgas_geradas,
         'Folgas Compradas': r.folgas_compradas_qtd,
@@ -466,19 +534,20 @@ export const Relatorios: React.FC = () => {
           },
         });
       } else if (activeTab === 'detalhe_est') {
-        const totalAprovado = detalhEstData.reduce((s, r) => s + r.total_aprovado, 0);
+        const totalAprovado = detalhEstData.reduce((s, r) => s + r.valor_aprovado, 0);
         autoTable(doc, {
           startY: 36,
-          head: [['Estabelecimento Penal', 'Cargo', 'Folgas Comp.', 'Plantão Plus', 'Total Aprovado']],
+          head: [['Estabelecimento Penal', 'Servidor', 'Cargo', 'Tipo', 'Data / Período', 'Valor Aprovado']],
           body: [
             ...detalhEstData.map(r => [
               r.nome_est,
-              `${r.position_codigo} — ${r.nome_cargo}`,
-              r.qtd_folga_comp.toString(),
-              r.qtd_plantao_plus.toString(),
-              fmt(r.total_aprovado),
+              r.nome_servidor,
+              r.position_codigo,
+              r.tipo_solicitacao === 'PLANTAO_PLUS' ? 'Plus' : 'Folga Comp.',
+              r.data_detalhe,
+              fmt(r.valor_aprovado),
             ]),
-            ['TOTAL GERAL', '', '', '', fmt(totalAprovado)],
+            ['TOTAL GERAL', '', '', '', '', fmt(totalAprovado)],
           ],
           headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 8, fontStyle: 'bold' },
           bodyStyles: { fontSize: 8 },
@@ -494,13 +563,14 @@ export const Relatorios: React.FC = () => {
         const totalPagar = folhaFiltered.reduce((s, r) => s + r.total_a_pagar, 0);
         autoTable(doc, {
           startY: 36,
-          head: [['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR']],
+          head: [['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR']],
           body: [
             ...folhaFiltered.map(r => [
               r.matricula,
               r.nome,
               r.cargo_codigo,
               r.nome_est,
+              `${Math.floor(r.minutos_trabalhados / 60)}h${(r.minutos_trabalhados % 60).toString().padStart(2, '0')}`,
               r.plantoes_trabalhados.toString(),
               r.folgas_geradas.toString(),
               r.folgas_compradas_qtd.toString(),
@@ -509,12 +579,12 @@ export const Relatorios: React.FC = () => {
               fmt(r.valor_plantao_plus),
               fmt(r.total_a_pagar),
             ]),
-            ['', 'TOTAL GERAL', '', '', '', '', '', '', '', '', fmt(totalPagar)],
+            ['', 'TOTAL GERAL', '', '', '', '', '', '', '', '', '', fmt(totalPagar)],
           ],
           headStyles: { fillColor: [124, 58, 237], textColor: 255, fontSize: 7, fontStyle: 'bold' },
           bodyStyles: { fontSize: 7 },
           alternateRowStyles: { fillColor: [245, 243, 255] },
-          columnStyles: { 10: { fontStyle: 'bold', textColor: [5, 150, 105] } },
+          columnStyles: { 11: { fontStyle: 'bold', textColor: [5, 150, 105] } },
           didParseCell: (data) => {
             if (data.row.index === folhaFiltered.length) {
               data.cell.styles.fontStyle = 'bold';
@@ -597,13 +667,53 @@ export const Relatorios: React.FC = () => {
           </select>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '220px', flex: '1' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '220px', flex: '1', position: 'relative' }} ref={estDropdownRef}>
           <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Estabelecimento Penal</label>
-          <select className="input" value={selectedEst} onChange={e => { setSelectedEst(e.target.value); }}
-            style={{ height: '38px', fontSize: '13px', borderRadius: '8px', border: '1px solid var(--color-divider)', padding: '0 12px' }}>
-            <option value="">Todas as Unidades</option>
-            {establishments.map(e => (<option key={e.id} value={e.id}>{e.nome}</option>))}
-          </select>
+          
+          <div 
+            onClick={() => { setIsEstDropdownOpen(true); setEstSearch(''); }}
+            style={{ height: '38px', fontSize: '13px', borderRadius: '8px', border: '1px solid var(--color-divider)', padding: '0 12px', display: 'flex', alignItems: 'center', background: '#fff', cursor: 'pointer' }}
+          >
+            {isEstDropdownOpen ? (
+              <input 
+                autoFocus
+                type="text" 
+                value={estSearch}
+                onChange={e => setEstSearch(e.target.value)}
+                placeholder="Buscar unidade..."
+                style={{ border: 'none', outline: 'none', width: '100%', fontSize: '13px', background: 'transparent' }}
+              />
+            ) : (
+              <span style={{ color: selectedEst ? '#1e293b' : '#000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {selectedEst ? establishments.find(e => e.id === selectedEst)?.nome : 'Todas as Unidades'}
+              </span>
+            )}
+          </div>
+
+          {isEstDropdownOpen && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid var(--color-divider)', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', zIndex: 10, maxHeight: '250px', overflowY: 'auto' }}>
+              <div 
+                onClick={() => { setSelectedEst(''); setIsEstDropdownOpen(false); }}
+                style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: selectedEst === '' ? '#f1f5f9' : 'transparent', borderBottom: '1px solid #f1f5f9', fontWeight: selectedEst === '' ? 600 : 400 }}
+              >
+                Todas as Unidades
+              </div>
+              {filteredEsts.map(e => (
+                <div 
+                  key={e.id}
+                  onClick={() => { setSelectedEst(e.id); setIsEstDropdownOpen(false); }}
+                  style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: selectedEst === e.id ? '#f1f5f9' : 'transparent', borderBottom: '1px solid #f1f5f9', fontWeight: selectedEst === e.id ? 600 : 400 }}
+                  onMouseEnter={ev => ev.currentTarget.style.background = '#f8fafc'}
+                  onMouseLeave={ev => ev.currentTarget.style.background = selectedEst === e.id ? '#f1f5f9' : 'transparent'}
+                >
+                  {e.nome}
+                </div>
+              ))}
+              {filteredEsts.length === 0 && (
+                <div style={{ padding: '8px 12px', fontSize: '13px', color: '#94a3b8', textAlign: 'center' }}>Nenhuma unidade encontrada</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px', flex: '1' }}>
@@ -777,79 +887,120 @@ export const Relatorios: React.FC = () => {
 
             {/* TAB 2: Detalhamento por Estabelecimento */}
             {activeTab === 'detalhe_est' && (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#059669' }}>
-                    {['Estabelecimento Penal', 'Cargo', 'Cód.', 'Folgas Comp.', 'Plantão Plus', 'Total Aprovado (R$)'].map(h => (
-                      <th key={h} style={{ padding: '10px 16px', color: '#fff', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase', textAlign: h === 'Estabelecimento Penal' || h === 'Cargo' ? 'left' : 'right', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {detalhEstData.map((r, i) => (
-                    <tr key={`${r.establishment_id}-${r.position_codigo}`} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#f0fdf4' }}>
-                      <td style={{ padding: '10px 16px', fontWeight: 600 }}>{r.nome_est}</td>
-                      <td style={{ padding: '10px 16px' }}>{r.nome_cargo}</td>
-                      <td style={{ padding: '10px 16px', textAlign: 'right' }}><span style={{ padding: '2px 8px', borderRadius: '4px', background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '11px' }}>{r.position_codigo}</span></td>
-                      <td style={{ padding: '10px 16px', textAlign: 'right' }}>{r.qtd_folga_comp}</td>
-                      <td style={{ padding: '10px 16px', textAlign: 'right' }}>{r.qtd_plantao_plus}</td>
-                      <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: '#059669' }}>{fmt(r.total_aprovado)}</td>
+              <>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: '#059669' }}>
+                      {['Estabelecimento', 'Servidor', 'Cargo', 'Tipo', 'Data', 'Justificativa', 'Valor Aprovado'].map(h => (
+                        <th key={h} style={{ padding: '10px 16px', color: '#fff', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase', textAlign: ['Valor Aprovado'].includes(h) ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ background: '#059669', color: '#fff' }}>
-                    <td style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL GERAL</td>
-                    <td colSpan={3}></td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700 }}>{kpiDetalh.totalFolgas + kpiDetalh.totalPlus}</td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700 }}>{fmt(kpiDetalh.totalAprovado)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody>
+                    {detalhPaginated.map((r, i) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#f0fdf4' }}>
+                        <td style={{ padding: '10px 16px', fontWeight: 600 }}>{r.nome_est}</td>
+                        <td style={{ padding: '10px 16px' }}>{r.nome_servidor}</td>
+                        <td style={{ padding: '10px 16px' }}><span style={{ padding: '2px 8px', borderRadius: '4px', background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '11px' }}>{r.position_codigo}</span></td>
+                        <td style={{ padding: '10px 16px' }}>{r.tipo_solicitacao === 'PLANTAO_PLUS' ? 'Plantão Plus' : 'Folga Comp.'}</td>
+                        <td style={{ padding: '10px 16px', whiteSpace: 'nowrap' }}>{r.data_detalhe}</td>
+                        <td style={{ padding: '10px 16px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.justificativa}>{r.justificativa}</td>
+                        <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700, color: '#059669' }}>{fmt(r.valor_aprovado)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: '#059669', color: '#fff' }}>
+                      <td colSpan={6} style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL GERAL — {detalhEstData.length} registro(s)</td>
+                      <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 700 }}>{fmt(kpiDetalh.totalAprovado)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+
+                {totalPagesDetalh > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', padding: '16px', background: '#fff' }}>
+                    <button 
+                      onClick={() => setCurrentPageDetalh(p => Math.max(1, p - 1))}
+                      disabled={currentPageDetalh === 1}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPageDetalh === 1 ? '#f1f5f9' : '#fff', cursor: currentPageDetalh === 1 ? 'not-allowed' : 'pointer', color: currentPageDetalh === 1 ? '#94a3b8' : '#334155' }}
+                    >Anterior</button>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>
+                      Página {currentPageDetalh} de {totalPagesDetalh}
+                    </span>
+                    <button 
+                      onClick={() => setCurrentPageDetalh(p => Math.min(totalPagesDetalh, p + 1))}
+                      disabled={currentPageDetalh === totalPagesDetalh}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPageDetalh === totalPagesDetalh ? '#f1f5f9' : '#fff', cursor: currentPageDetalh === totalPagesDetalh ? 'not-allowed' : 'pointer', color: currentPageDetalh === totalPagesDetalh ? '#94a3b8' : '#334155' }}
+                    >Próxima</button>
+                  </div>
+                )}
+              </>
             )}
 
             {/* TAB 3: Folha por Servidor */}
             {activeTab === 'folha_servidor' && (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ background: '#7c3aed' }}>
-                    {['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR'].map(h => (
-                      <th key={h} style={{ padding: '10px 12px', color: '#fff', fontWeight: 600, fontSize: '10px', textTransform: 'uppercase', textAlign: ['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento'].includes(h) ? 'left' : 'right', whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {folhaFiltered.map((r, i) => (
-                    <tr key={r.employee_id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#faf5ff' }}>
-                      <td style={{ padding: '9px 12px', fontWeight: 600, color: '#475569' }}>{r.matricula}</td>
-                      <td style={{ padding: '9px 12px', fontWeight: 600 }}>{r.nome}</td>
-                      <td style={{ padding: '9px 12px' }}>
-                        <span style={{ padding: '2px 8px', borderRadius: '4px', background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '10px' }}>{r.cargo_codigo}</span>
-                      </td>
-                      <td style={{ padding: '9px 12px', color: '#475569', fontSize: '11px' }}>{r.nome_est}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' }}>{r.plantoes_trabalhados}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' }}>{r.folgas_geradas}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right', color: '#059669', fontWeight: 600 }}>{r.folgas_compradas_qtd}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right', color: '#7c3aed', fontWeight: 600 }}>{r.plantao_plus_qtd}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' }}>{fmt(r.valor_folga_comp)}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right' }}>{fmt(r.valor_plantao_plus)}</td>
-                      <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: '#059669', fontSize: '13px' }}>{fmt(r.total_a_pagar)}</td>
+              <>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#7c3aed' }}>
+                      {['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', color: '#fff', fontWeight: 600, fontSize: '10px', textTransform: 'uppercase', textAlign: ['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento'].includes(h) ? 'left' : 'right', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ background: '#7c3aed', color: '#fff' }}>
-                    <td colSpan={4} style={{ padding: '10px 12px', fontWeight: 700 }}>TOTAL GERAL — {folhaFiltered.length} servidor(es)</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.plantoes_trabalhados, 0)}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.folgas_geradas, 0)}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.folgas_compradas_qtd, 0)}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.plantao_plus_qtd, 0)}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{fmt(folhaFiltered.reduce((s, r) => s + r.valor_folga_comp, 0))}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{fmt(folhaFiltered.reduce((s, r) => s + r.valor_plantao_plus, 0))}</td>
-                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, fontSize: '14px' }}>{fmt(kpiFolha.totalPagar)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody>
+                    {folhaPaginated.map((r, i) => (
+                      <tr key={r.employee_id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#faf5ff' }}>
+                        <td style={{ padding: '9px 12px', fontWeight: 600, color: '#475569' }}>{r.matricula}</td>
+                        <td style={{ padding: '9px 12px', fontWeight: 600 }}>{r.nome}</td>
+                        <td style={{ padding: '9px 12px' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: '4px', background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '10px' }}>{r.cargo_codigo}</span>
+                        </td>
+                        <td style={{ padding: '9px 12px', color: '#475569', fontSize: '11px' }}>{r.nome_est}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 600 }}>{Math.floor(r.minutos_trabalhados / 60)}h{(r.minutos_trabalhados % 60).toString().padStart(2, '0')}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right' }}>{r.plantoes_trabalhados}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right' }}>{r.folgas_geradas}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right', color: '#059669', fontWeight: 600 }}>{r.folgas_compradas_qtd}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right', color: '#7c3aed', fontWeight: 600 }}>{r.plantao_plus_qtd}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right' }}>{fmt(r.valor_folga_comp)}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right' }}>{fmt(r.valor_plantao_plus)}</td>
+                        <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 700, color: '#059669', fontSize: '13px' }}>{fmt(r.total_a_pagar)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: '#7c3aed', color: '#fff' }}>
+                      <td colSpan={4} style={{ padding: '10px 12px', fontWeight: 700 }}>TOTAL GERAL — {folhaFiltered.length} servidor(es)</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + Math.floor(r.minutos_trabalhados / 60), 0)}h</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.plantoes_trabalhados, 0)}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.folgas_geradas, 0)}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.folgas_compradas_qtd, 0)}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.plantao_plus_qtd, 0)}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{fmt(folhaFiltered.reduce((s, r) => s + r.valor_folga_comp, 0))}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{fmt(folhaFiltered.reduce((s, r) => s + r.valor_plantao_plus, 0))}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700, fontSize: '14px' }}>{fmt(kpiFolha.totalPagar)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', padding: '16px', background: '#fff' }}>
+                    <button 
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPage === 1 ? '#f1f5f9' : '#fff', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: currentPage === 1 ? '#94a3b8' : '#334155' }}
+                    >Anterior</button>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>
+                      Página {currentPage} de {totalPages}
+                    </span>
+                    <button 
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPage === totalPages ? '#f1f5f9' : '#fff', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? '#94a3b8' : '#334155' }}
+                    >Próxima</button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

@@ -123,7 +123,7 @@ export const Folgas: React.FC = () => {
           .select('employee_id')
           .eq('establishment_id', profile!.establishment_id)
           .eq('tipo_solicitacao', 'PLANTAO_PLUS')
-          .eq('status', 'PENDENTE'),
+          .eq('status', 'SOLICITADA'),
       ]);
 
       if (empData) {
@@ -361,10 +361,10 @@ export const Folgas: React.FC = () => {
       <div style={{ marginBottom: 'var(--space-5)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <h2 style={{ margin: 0 }}>Lançamento de Plantões</h2>
-          <p className="text-muted" style={{ margin: '4px 0 0' }}>
+          <p className="text-muted" style={{ margin: 0 }}>
             {activeCycle
-              ? `Ciclo ativo: ${activeCycle.nome} — saldo acumula automaticamente a cada 252 horas (21 plantões) trabalhadas.`
-              : 'Nenhum ciclo ativo encontrado.'}
+              ? `Ciclo ativo: ${activeCycle.nome} — o sistema gera 1 folga a cada 252 horas acumuladas (21 plantões de 12h).`
+              : 'Nenhum ciclo ativo no momento.'}
           </p>
         </div>
         {activeCycle && (

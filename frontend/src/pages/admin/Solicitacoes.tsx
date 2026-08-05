@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { CheckCircle, XCircle, AlertCircle, Filter, ShoppingCart, Clock } from 'lucide-react';
@@ -30,6 +30,7 @@ type PurchaseRequest = {
 
 type Cycle = { id: string; nome: string; status: string };
 type Establishment = { id: string; nome: string };
+type Position = { id: string; nome: string };
 
 export const Solicitacoes: React.FC = () => {
   const { profile } = useAuth();
@@ -37,13 +38,33 @@ export const Solicitacoes: React.FC = () => {
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   
   const [selectedCycle, setSelectedCycle] = useState('');
   const [selectedEst, setSelectedEst] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('SOLICITADA'); // Default show pending
+  const [selectedStatus, setSelectedStatus] = useState(''); // Default show all
   
   const [loading, setLoading] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
+
+  // Custom Dropdown State for Estabelecimento Penal
+  const [isEstDropdownOpen, setIsEstDropdownOpen] = useState(false);
+  const [estSearch, setEstSearch] = useState('');
+  const estDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (estDropdownRef.current && !estDropdownRef.current.contains(event.target as Node)) {
+        setIsEstDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredEsts = useMemo(() => {
+    return establishments.filter(e => e.nome.toLowerCase().includes(estSearch.toLowerCase()));
+  }, [establishments, estSearch]);
 
   useEffect(() => {
     loadFilters();
@@ -54,16 +75,18 @@ export const Solicitacoes: React.FC = () => {
       loadRequests();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCycle, selectedEst, selectedStatus]);
+  }, [selectedCycle, selectedEst]); // removed selectedStatus because filtering is now client-side
 
   const loadFilters = async () => {
-    const [{ data: cData }, { data: eData }] = await Promise.all([
+    const [{ data: cData }, { data: eData }, { data: pData }] = await Promise.all([
       supabase.from('cycles').select('id, nome, status').order('ano', { ascending: false }).order('mes', { ascending: false }),
-      supabase.from('establishments').select('id, nome').eq('ativo', true).order('nome')
+      supabase.from('establishments').select('id, nome').eq('ativo', true).order('nome'),
+      supabase.from('positions').select('id, nome').eq('ativo', true).order('nome')
     ]);
     
     setCycles(cData || []);
     setEstablishments(eData || []);
+    setPositions(pData || []);
     
     const aberto = (cData || []).find(c => c.status === 'ABERTO' || c.status === 'REABERTO');
     if (aberto) setSelectedCycle(aberto.id);
@@ -85,7 +108,7 @@ export const Solicitacoes: React.FC = () => {
         .order('requested_at', { ascending: false });
 
       if (selectedEst) q = q.eq('establishment_id', selectedEst);
-      if (selectedStatus) q = q.eq('status', selectedStatus);
+      // Status filter is now client-side so stats can be computed accurately
 
       const { data, error } = await q;
       if (error) throw error;
@@ -122,11 +145,8 @@ export const Solicitacoes: React.FC = () => {
         if (compErr) throw compErr;
       }
 
-      // Atualiza lista localmente
-      setRequests(requests.filter(r => r.id !== req.id || selectedStatus === ''));
-      if (selectedStatus === '') {
-        setRequests(requests.map(r => r.id === req.id ? { ...r, status: 'APROVADA' } : r));
-      }
+      // Atualiza lista localmente (mantendo ela na memória principal para não quebrar stats)
+      setRequests(requests.map(r => r.id === req.id ? { ...r, status: 'APROVADA' } : r));
 
     } catch (e: any) {
       alert('Erro ao aprovar: ' + e.message);
@@ -168,10 +188,7 @@ export const Solicitacoes: React.FC = () => {
       }
 
       // Atualiza lista localmente
-      setRequests(requests.filter(r => r.id !== req.id || selectedStatus === ''));
-      if (selectedStatus === '') {
-        setRequests(requests.map(r => r.id === req.id ? { ...r, status: 'REJEITADA', rejection_reason: reason.trim() } : r));
-      }
+      setRequests(requests.map(r => r.id === req.id ? { ...r, status: 'REJEITADA', rejection_reason: reason.trim() } : r));
 
     } catch (e: any) {
       alert('Erro ao rejeitar: ' + e.message);
@@ -184,6 +201,28 @@ export const Solicitacoes: React.FC = () => {
   const fmtDate = (d: string) => new Date(d).toLocaleDateString('pt-BR');
   const fmtDateTime = (d: string) => new Date(d).toLocaleString('pt-BR');
 
+  // Cálculos das Estatísticas
+  const statsStatus = { SOLICITADA: 0, APROVADA: 0, REJEITADA: 0, CANCELADA: 0 };
+  const gastoPorCargo: Record<string, number> = {};
+
+  // Inicializa todos os cargos ativos com gasto 0
+  positions.forEach(p => {
+    gastoPorCargo[p.nome] = 0;
+  });
+
+  requests.forEach(r => {
+    if (r.status in statsStatus) {
+      statsStatus[r.status as keyof typeof statsStatus]++;
+    }
+    // Soma valor gasto apenas se APROVADA
+    if (r.status === 'APROVADA') {
+      const cargo = r.employees.positions.nome;
+      gastoPorCargo[cargo] = (gastoPorCargo[cargo] || 0) + r.valor;
+    }
+  });
+
+  const filteredRequests = selectedStatus ? requests.filter(r => r.status === selectedStatus) : requests;
+
   return (
     <div style={{ padding: 'var(--space-6)', maxWidth: '1400px', margin: '0 auto' }}>
       
@@ -195,6 +234,31 @@ export const Solicitacoes: React.FC = () => {
           </h1>
           <p style={{ margin: 0, color: 'var(--color-text-muted)' }}>Analise as solicitações de Folga Compensatória e Plantão Plus enviadas pelas unidades.</p>
         </div>
+      </div>
+
+      {/* Cards de Estatística */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--space-4)', marginBottom: 'var(--space-6)' }}>
+        <div className="modern-card" style={{ padding: 'var(--space-4)', borderLeft: '4px solid #f59e0b' }}>
+          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Pendentes</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--color-text-base)', marginTop: '4px' }}>{statsStatus.SOLICITADA}</div>
+        </div>
+        <div className="modern-card" style={{ padding: 'var(--space-4)', borderLeft: '4px solid #10b981' }}>
+          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Aprovadas</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--color-text-base)', marginTop: '4px' }}>{statsStatus.APROVADA}</div>
+        </div>
+        <div className="modern-card" style={{ padding: 'var(--space-4)', borderLeft: '4px solid #ef4444' }}>
+          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Rejeitadas</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--color-text-base)', marginTop: '4px' }}>{statsStatus.REJEITADA}</div>
+        </div>
+        
+        {Object.entries(gastoPorCargo).sort((a, b) => b[1] - a[1]).map(([cargo, valor]) => (
+          <div key={cargo} className="modern-card" style={{ padding: 'var(--space-4)', borderLeft: '4px solid #3b82f6' }}>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase', lineHeight: '1.4' }} title={cargo}>
+              Gasto: {cargo}
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-text-base)', marginTop: '4px' }}>{fmtCurrency(valor)}</div>
+          </div>
+        ))}
       </div>
 
       {/* Filtros */}
@@ -218,20 +282,55 @@ export const Solicitacoes: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ flex: '2 1 250px' }}>
+        <div style={{ flex: '2 1 250px', position: 'relative' }} ref={estDropdownRef}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
             Unidade Penal
           </label>
-          <select 
-            value={selectedEst} 
-            onChange={e => setSelectedEst(e.target.value)}
-            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          
+          <div 
+            onClick={() => { setIsEstDropdownOpen(true); setEstSearch(''); }}
+            style={{ width: '100%', height: '38px', padding: '0 10px', borderRadius: '8px', border: '1px solid var(--color-border)', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
           >
-            <option value="">Todas as Unidades</option>
-            {establishments.map(e => (
-              <option key={e.id} value={e.id}>{e.nome}</option>
-            ))}
-          </select>
+            {isEstDropdownOpen ? (
+              <input 
+                autoFocus
+                type="text" 
+                value={estSearch}
+                onChange={e => setEstSearch(e.target.value)}
+                placeholder="Buscar unidade..."
+                style={{ border: 'none', outline: 'none', width: '100%', fontSize: '14px', background: 'transparent', padding: 0 }}
+              />
+            ) : (
+              <span style={{ color: selectedEst ? 'var(--color-text-base)' : 'var(--color-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '14px' }}>
+                {selectedEst ? establishments.find(e => e.id === selectedEst)?.nome : 'Todas as Unidades'}
+              </span>
+            )}
+          </div>
+
+          {isEstDropdownOpen && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid var(--color-border)', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', zIndex: 10, maxHeight: '250px', overflowY: 'auto' }}>
+              <div 
+                onClick={() => { setSelectedEst(''); setIsEstDropdownOpen(false); }}
+                style={{ padding: '10px 12px', fontSize: '14px', cursor: 'pointer', background: selectedEst === '' ? 'var(--color-bg-elevated)' : 'transparent', borderBottom: '1px solid var(--color-border)', fontWeight: selectedEst === '' ? 600 : 400 }}
+              >
+                Todas as Unidades
+              </div>
+              {filteredEsts.map(e => (
+                <div 
+                  key={e.id}
+                  onClick={() => { setSelectedEst(e.id); setIsEstDropdownOpen(false); }}
+                  style={{ padding: '10px 12px', fontSize: '14px', cursor: 'pointer', background: selectedEst === e.id ? 'var(--color-bg-elevated)' : 'transparent', borderBottom: '1px solid var(--color-border)', fontWeight: selectedEst === e.id ? 600 : 400 }}
+                  onMouseEnter={ev => ev.currentTarget.style.background = 'var(--color-bg-elevated)'}
+                  onMouseLeave={ev => ev.currentTarget.style.background = selectedEst === e.id ? 'var(--color-bg-elevated)' : 'transparent'}
+                >
+                  {e.nome}
+                </div>
+              ))}
+              {filteredEsts.length === 0 && (
+                <div style={{ padding: '10px 12px', fontSize: '14px', color: 'var(--color-text-muted)', textAlign: 'center' }}>Nenhuma unidade encontrada</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ flex: '1 1 150px' }}>
@@ -257,7 +356,7 @@ export const Solicitacoes: React.FC = () => {
         
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Carregando solicitações...</div>
-        ) : requests.length === 0 ? (
+        ) : filteredRequests.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
             <AlertCircle size={32} />
             Nenhuma solicitação encontrada para os filtros aplicados.
@@ -276,7 +375,7 @@ export const Solicitacoes: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {requests.map(req => (
+                {filteredRequests.map(req => (
                   <tr key={req.id} style={{ borderBottom: '1px solid #e2e8f0', background: '#fff' }}>
                     
                     <td style={{ padding: '16px' }}>
