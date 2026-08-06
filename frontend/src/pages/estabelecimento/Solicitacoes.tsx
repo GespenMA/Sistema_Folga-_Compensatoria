@@ -47,7 +47,7 @@ export const Solicitacoes: React.FC = () => {
   
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  // const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [isUsufrutoModalOpen, setIsUsufrutoModalOpen] = useState(false);
   const [selectedFolga, setSelectedFolga] = useState<any>(null);
   const [dataPlantao, setDataPlantao] = useState('');
