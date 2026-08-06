@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 
 type PlanningLimit = {
@@ -37,6 +37,7 @@ export const Estabelecimentos: React.FC = () => {
   const [basePositions, setBasePositions] = useState<BasePosition[]>([]);
   const [activeCycleId, setActiveCycleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [positionValues, setPositionValues] = useState<Record<string, number>>({});
   
   // Estados do Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -79,6 +80,16 @@ export const Estabelecimentos: React.FC = () => {
       // Pega IDs dos cargos base para sabermos em qual inserir
       const { data: posData } = await supabase.from('positions').select('id, codigo');
       if (posData) setBasePositions(posData);
+
+      // Busca valores vigentes dos cargos para KPIs
+      const { data: pvData } = await supabase.from('position_values').select('valor, positions(codigo)').is('vigencia_fim', null);
+      if (pvData) {
+        const valuesMap: Record<string, number> = {};
+        pvData.forEach((pv: any) => {
+          if (pv.positions?.codigo) valuesMap[pv.positions.codigo] = Number(pv.valor);
+        });
+        setPositionValues(valuesMap);
+      }
 
       // Pega o Ciclo Ativo mais relevante (RASCUNHO, ABERTO ou REABERTO)
       const { data: cycleData } = await supabase
@@ -262,6 +273,45 @@ export const Estabelecimentos: React.FC = () => {
     }
   };
 
+  const formatCurrency = (val: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+
+  const filteredEstabelecimentos = useMemo(() => {
+    return estabelecimentos.filter((est) => {
+      const matchNome = est.nome.toLowerCase().includes(filterNome.toLowerCase());
+      const matchTipo = filterTipo ? est.tipo === filterTipo : true;
+      const matchLocalizacao = filterLocalizacao ? est.localizacao === filterLocalizacao : true;
+      const matchComplexidade = filterComplexidade ? est.complexidade === filterComplexidade : true;
+      return matchNome && matchTipo && matchLocalizacao && matchComplexidade;
+    });
+  }, [estabelecimentos, filterNome, filterTipo, filterLocalizacao, filterComplexidade]);
+
+  const kpis = useMemo(() => {
+    let totalOrçado = 0;
+    let totalINSP = 0;
+    let totalAPT = 0;
+    let totalASP = 0;
+
+    filteredEstabelecimentos.forEach(est => {
+      const cycleData = est.cycle_establishments?.find(ce => ce.cycle_id === activeCycleId);
+      if (cycleData) {
+        totalOrçado += Number(cycleData.total_orcado || 0);
+
+        cycleData.planning_limits?.forEach(pl => {
+          const cod = pl.positions?.codigo;
+          const qtd = Number(pl.quantidade_planejada || 0);
+          const val = positionValues[cod as string] || 0;
+          const custo = qtd * val;
+
+          if (cod === 'INSP') totalINSP += custo;
+          else if (cod === 'APT') totalAPT += custo;
+          else if (cod === 'ASP') totalASP += custo;
+        });
+      }
+    });
+
+    return { totalOrçado, totalINSP, totalAPT, totalASP };
+  }, [filteredEstabelecimentos, activeCycleId, positionValues]);
+
   return (
     <div>
       <div style={{ marginBottom: 'var(--space-6)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -274,6 +324,29 @@ export const Estabelecimentos: React.FC = () => {
         <button className="btn btn-primary" onClick={openNewModal}>
           Novo Estabelecimento
         </button>
+      </div>
+
+      {/* KPIs de Orçamento */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', borderRadius: '12px', padding: '16px', color: '#fff', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+          <div style={{ fontSize: '13px', fontWeight: 600, opacity: 0.9, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Geral Orçado</div>
+          <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '8px' }}>{formatCurrency(kpis.totalOrçado)}</div>
+        </div>
+        
+        <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Inspetores (INSP)</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-text)', marginTop: '8px' }}>{formatCurrency(kpis.totalINSP)}</div>
+        </div>
+
+        <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Agentes (APT)</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-text)', marginTop: '8px' }}>{formatCurrency(kpis.totalAPT)}</div>
+        </div>
+
+        <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: '12px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Auxiliares (ASP)</div>
+          <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-text)', marginTop: '8px' }}>{formatCurrency(kpis.totalASP)}</div>
+        </div>
       </div>
 
       {/* Filtros */}
@@ -371,26 +444,14 @@ export const Estabelecimentos: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {estabelecimentos.filter((est) => {
-                  const matchNome = est.nome.toLowerCase().includes(filterNome.toLowerCase());
-                  const matchTipo = filterTipo ? est.tipo === filterTipo : true;
-                  const matchLocalizacao = filterLocalizacao ? est.localizacao === filterLocalizacao : true;
-                  const matchComplexidade = filterComplexidade ? est.complexidade === filterComplexidade : true;
-                  return matchNome && matchTipo && matchLocalizacao && matchComplexidade;
-                }).length === 0 ? (
+                {filteredEstabelecimentos.length === 0 ? (
                   <tr>
                     <td colSpan={9} style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                       Nenhum estabelecimento corresponde aos filtros aplicados.
                     </td>
                   </tr>
                 ) : (
-                estabelecimentos.filter((est) => {
-                  const matchNome = est.nome.toLowerCase().includes(filterNome.toLowerCase());
-                  const matchTipo = filterTipo ? est.tipo === filterTipo : true;
-                  const matchLocalizacao = filterLocalizacao ? est.localizacao === filterLocalizacao : true;
-                  const matchComplexidade = filterComplexidade ? est.complexidade === filterComplexidade : true;
-                  return matchNome && matchTipo && matchLocalizacao && matchComplexidade;
-                }).map(est => {
+                filteredEstabelecimentos.map(est => {
                   // Pega os dados orçamentários do ciclo ativo correspondente
                   const currentCycleData = est.cycle_establishments?.find(ce => ce.cycle_id === activeCycleId);
                   
@@ -413,9 +474,10 @@ export const Estabelecimentos: React.FC = () => {
                         <span className="tag" style={{ background: 'var(--color-surface)' }}>{est.complexidade || 'N/A'}</span>
                       </td>
                       <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 600, color: 'var(--color-accent-700)' }}>
-                        {currentCycleData?.total_orcado !== undefined 
-                          ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(currentCycleData.total_orcado)
-                          : '-'}
+                        {currentCycleData ? formatCurrency(
+                          (currentCycleData.planning_limits || []).reduce((acc, pl) => acc + (pl.quantidade_planejada * (positionValues[pl.positions?.codigo as string] || 0)), 0) 
+                          || currentCycleData.total_orcado
+                        ) : '-'}
                       </td>
                       <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'center' }}>{getLimit('INSP')}</td>
                       <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'center' }}>{getLimit('APT')}</td>

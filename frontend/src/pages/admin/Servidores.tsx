@@ -166,7 +166,7 @@ export const Servidores: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(totalRecords / ITEMS_PER_PAGE));
 
   return (
-    <div style={{ maxWidth: '1400px', margin: '0 auto', paddingBottom: '40px' }}>
+    <div style={{ paddingBottom: '40px' }}>
       
       <div style={{ marginBottom: 'var(--space-6)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '16px' }}>
         <div>

@@ -141,8 +141,8 @@ export const EstabelecimentoLayout: React.FC = () => {
         </div>
 
         {/* MAIN CONTENT */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <div style={{ padding: '32px 5vw' }}>
+        <div style={{ flex: 1, overflowY: 'auto', background: 'var(--color-bg)' }}>
+          <div style={{ padding: 'var(--space-6)' }}>
             <Outlet />
           </div>
         </div>

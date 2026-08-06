@@ -1214,7 +1214,7 @@ export const Configuracoes: React.FC = () => {
                   value={cargoValor} 
                   onChange={(e) => setCargoValor(e.target.value)} 
                   required 
-                  placeholder="Ex: 291.57"
+                  placeholder="Ex: 316.21"
                 />
               </div>
 

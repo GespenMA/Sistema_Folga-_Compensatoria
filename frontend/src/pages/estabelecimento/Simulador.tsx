@@ -40,34 +40,41 @@ export const Simulador: React.FC = () => {
       if (cycleData) {
         setActiveCycle(cycleData);
         
-        // 2. Obter limite orçamentário
+        // 2. Obter Cargos e Valores Ativos
+        const { data: pvData } = await supabase
+          .from('position_values')
+          .select('valor, position_id, positions(id, nome, codigo)')
+          .is('vigencia_fim', null);
+          
+        const pvMap: Record<string, number> = {};
+        if (pvData) {
+          const cargosMapeados = pvData.map((pv: any) => {
+            pvMap[pv.position_id || pv.positions?.id] = Number(pv.valor);
+            return {
+              id: pv.positions.id,
+              nome: pv.positions.nome,
+              codigo: pv.positions.codigo,
+              valorFolga: Number(pv.valor)
+            };
+          }).sort((a, b) => a.nome.localeCompare(b.nome));
+          
+          setCargos(cargosMapeados);
+        }
+
+        // 3. Obter limite orçamentário
         const { data: ceData } = await supabase
           .from('cycle_establishments')
-          .select('total_orcado')
+          .select('total_orcado, planning_limits(quantidade_planejada, position_id)')
           .eq('cycle_id', cycleData.id)
           .eq('establishment_id', profile!.establishment_id)
           .maybeSingle();
 
-        if (ceData) {
-          setTotalOrcado(ceData.total_orcado);
-        }
-
-        // 3. Obter Cargos e Valores Ativos
-        // position_values onde vigencia_fim is null representam o valor atual.
-        const { data: pvData } = await supabase
-          .from('position_values')
-          .select('valor, positions(id, nome, codigo)')
-          .is('vigencia_fim', null);
-          
-        if (pvData) {
-          const cargosMapeados = pvData.map((pv: any) => ({
-            id: pv.positions.id,
-            nome: pv.positions.nome,
-            codigo: pv.positions.codigo,
-            valorFolga: Number(pv.valor)
-          })).sort((a, b) => a.nome.localeCompare(b.nome));
-          
-          setCargos(cargosMapeados);
+        if (ceData && ceData.planning_limits) {
+          let recalc = 0;
+          ceData.planning_limits.forEach((pl: any) => {
+            recalc += (pl.quantidade_planejada || 0) * (pvMap[pl.position_id] || 0);
+          });
+          setTotalOrcado(recalc);
         }
       }
     } catch (err) {

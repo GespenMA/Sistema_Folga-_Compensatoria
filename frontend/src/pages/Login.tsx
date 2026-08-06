@@ -235,7 +235,6 @@ export const Login: React.FC = () => {
                   type={showPassword ? "text" : "password"} 
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)} 
-                  placeholder="••••••••" 
                   required
                   style={{
                     width: '100%',

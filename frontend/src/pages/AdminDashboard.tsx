@@ -104,13 +104,33 @@ export const AdminDashboard: React.FC = () => {
           if (requestsError) throw requestsError;
           if (reqs) setRequests(reqs);
 
-          // 4. Orçamentos por estabelecimento
+          // 4. Orçamentos por estabelecimento e Recálculo em tempo real
+          const { data: pvs } = await supabase.from('position_values').select('valor, positions(codigo)').is('vigencia_fim', null);
+          const pvMap: Record<string, number> = {};
+          if (pvs) {
+            pvs.forEach((p: any) => { if (p.positions?.codigo) pvMap[p.positions.codigo] = Number(p.valor); });
+          }
+
           const { data: cEsts, error: cycleEstablishmentsError } = await supabase
             .from('cycle_establishments')
-            .select('establishment_id, total_orcado, establishments(nome, localizacao)')
+            .select('establishment_id, total_orcado, establishments(nome, localizacao), planning_limits(quantidade_planejada, positions(codigo))')
             .eq('cycle_id', ciclo.id);
+          
           if (cycleEstablishmentsError) throw cycleEstablishmentsError;
-          if (cEsts) setCycleEstablishments(cEsts);
+          if (cEsts) {
+            const recalced = cEsts.map((ce: any) => {
+              if (ce.planning_limits && ce.planning_limits.length > 0) {
+                let calc = 0;
+                ce.planning_limits.forEach((pl: any) => {
+                  const code = pl.positions?.codigo;
+                  calc += (pl.quantidade_planejada || 0) * (pvMap[code] || 0);
+                });
+                if (calc > 0) ce.total_orcado = calc;
+              }
+              return ce;
+            });
+            setCycleEstablishments(recalced);
+          }
 
           // 5. Cargos para o gráfico de pizza
           const { data: pos, error: positionsError } = await supabase.from('positions').select('id, nome, codigo');

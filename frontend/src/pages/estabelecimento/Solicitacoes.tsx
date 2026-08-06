@@ -40,14 +40,19 @@ export const Solicitacoes: React.FC = () => {
   const { profile } = useAuth();
   const [activeCycle, setActiveCycle] = useState<any>(null);
   const [folgasDisponiveis, setFolgasDisponiveis] = useState<FolgaDisponivel[]>([]);
+  const [folgasUsufruidas, setFolgasUsufruidas] = useState<any[]>([]);
+  const [activeRightTab, setActiveRightTab] = useState<'FINANCEIRO' | 'USUFRUIDAS'>('FINANCEIRO');
   const [solicitacoes, setSolicitacoes] = useState<Solicitacao[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Modal de Compra
+  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedFolga, setSelectedFolga] = useState<FolgaDisponivel | null>(null);
-  const [justificativa, setJustificativa] = useState('');
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [isUsufrutoModalOpen, setIsUsufrutoModalOpen] = useState(false);
+  const [selectedFolga, setSelectedFolga] = useState<any>(null);
   const [dataPlantao, setDataPlantao] = useState('');
+  const [justificativa, setJustificativa] = useState('');
+  const [dataUsufruto, setDataUsufruto] = useState('');
   const [valorUnitario, setValorUnitario] = useState(0);
   const [valorHistoricoId, setValorHistoricoId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -125,11 +130,39 @@ export const Solicitacoes: React.FC = () => {
         
         if (folgas) setFolgasDisponiveis(folgas as unknown as FolgaDisponivel[]);
 
-        // 3. Busca solicitações já feitas no ciclo (SOLICITADA, APROVADA, REJEITADA)
+        // 2b. Busca folgas usufruidas
+        const { data: usufruidas } = await supabase
+          .from('compensatory_days')
+          .select(`
+            id, used_at, quantidade_plantoes, status,
+            employees (
+              id, nome, matricula,
+              positions (id, nome, codigo)
+            )
+          `)
+          .eq('cycle_id', cycleData.id)
+          .eq('status', 'USUFRUIDA')
+          .order('used_at', { ascending: false });
+        
+        if (usufruidas) setFolgasUsufruidas(usufruidas);
+
+        // 3. Busca valores atualizados dos cargos PRIMEIRO para poder recalcular tudo
+        const { data: posVals } = await supabase
+          .from('position_values')
+          .select('position_id, valor')
+          .is('vigencia_fim', null);
+        
+        const vals: Record<string, number> = {};
+        if (posVals) {
+          posVals.forEach(v => vals[v.position_id] = Number(v.valor));
+          setPositionValues(vals);
+        }
+
+        // 4. Busca solicitações já feitas no ciclo
         const { data: sols } = await supabase
           .from('purchase_requests')
           .select(`
-            id, valor, status, justificativa, requested_at, tipo_solicitacao, data_plantao,
+            id, valor, status, justificativa, requested_at, tipo_solicitacao, data_plantao, position_id,
             compensatory_days (periodo_inicio, periodo_fim, quantidade_plantoes),
             employees (nome, matricula, positions(nome, codigo))
           `)
@@ -137,44 +170,47 @@ export const Solicitacoes: React.FC = () => {
           .eq('establishment_id', profile!.establishment_id)
           .order('requested_at', { ascending: false });
           
-        if (sols) setSolicitacoes(sols as unknown as Solicitacao[]);
+        if (sols) {
+          // Atualiza as solicitações com o valor mais recente!
+          const mappedSols = (sols as any[]).map(s => {
+            if (s.position_id && vals[s.position_id]) {
+              s.valor = vals[s.position_id];
+            }
+            return s;
+          });
+          setSolicitacoes(mappedSols as unknown as Solicitacao[]);
+        }
 
-        // 4. Calcular saldo do orçamento disponível
+        // 5. Calcular saldo do orçamento disponível recálculado
         const { data: ceData } = await supabase
           .from('cycle_establishments')
-          .select('total_orcado')
+          .select('total_orcado, planning_limits(quantidade_planejada, position_id)')
           .eq('cycle_id', cycleData.id)
           .eq('establishment_id', profile!.establishment_id)
           .maybeSingle();
 
-        const orcado = ceData?.total_orcado || 0;
-        const consumido = (sols || [])
-          .filter(s => s.status === 'APROVADA')
-          .reduce((acc, curr) => acc + Number(curr.valor), 0);
+        let orcado = 0;
+        if (ceData && ceData.planning_limits) {
+          ceData.planning_limits.forEach((pl: any) => {
+             orcado += (pl.quantidade_planejada || 0) * (vals[pl.position_id] || 0);
+          });
+        }
 
-        const empenhado = (sols || [])
+        const solsList = (sols || []) as any[];
+        const consumido = solsList
+          .filter(s => s.status === 'APROVADA')
+          .reduce((acc, curr) => acc + Number(vals[curr.position_id] || curr.valor), 0);
+
+        const empenhado = solsList
           .filter(s => s.status === 'SOLICITADA')
-          .reduce((acc, curr) => acc + Number(curr.valor), 0);
+          .reduce((acc, curr) => acc + Number(vals[curr.position_id] || curr.valor), 0);
           
         setTotalOrcado(orcado);
         setTotalGasto(consumido);
         setTotalEmpenhado(empenhado);
         setOrcamentoDisponivel(orcado - consumido);
-
-        // 5. Busca valores atualizados dos cargos
-        const { data: posVals } = await supabase
-          .from('position_values')
-          .select('position_id, valor')
-          .order('vigencia_inicio', { ascending: false });
-        
-        if (posVals) {
-          const vals: Record<string, number> = {};
-          posVals.forEach(v => {
-            if (!vals[v.position_id]) vals[v.position_id] = v.valor;
-          });
-          setPositionValues(vals);
-        }
       }
+
     } catch (err) {
       console.error(err);
     } finally {
@@ -182,30 +218,44 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
-  const openCompraModal = async (folga: FolgaDisponivel) => {
-    setSelectedFolga(folga);
-    setJustificativa('');
-    setDataPlantao('');
-    
-    // Buscar o valor atual do cargo para calcular
-    const positionId = folga.employees.positions.id;
-    const { data: posVal } = await supabase
-      .from('position_values')
-      .select('id, valor')
-      .eq('position_id', positionId)
-      .order('vigencia_inicio', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  const openCompraModal = async (folga: FolgaDisponivel | any) => {
+    try {
+      setSelectedFolga(folga);
+      setJustificativa('');
+      setDataPlantao('');
       
-    if (posVal) {
-      setValorUnitario(posVal.valor);
-      setValorHistoricoId(posVal.id);
-    } else {
-      alert("Erro: O cargo deste servidor não possui valor configurado. Entre em contato com o gestor.");
-      return;
-    }
+      // Buscar o valor atual do cargo para calcular
+      const positionId = folga.employees?.positions?.id;
+      if (!positionId) {
+        alert("Erro: O cargo deste servidor não foi encontrado.");
+        return;
+      }
 
-    setIsModalOpen(true);
+      const { data: posVal, error } = await supabase
+        .from('position_values')
+        .select('id, valor')
+        .eq('position_id', positionId)
+        .order('vigencia_inicio', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+        
+      if (error) {
+        alert("Erro no banco de dados: " + error.message);
+        return;
+      }
+
+      if (posVal) {
+        setValorUnitario(posVal.valor);
+        setValorHistoricoId(posVal.id);
+      } else {
+        alert("Erro: O cargo deste servidor não possui valor configurado. Entre em contato com o gestor.");
+        return;
+      }
+
+      setIsModalOpen(true);
+    } catch (err: any) {
+      alert("Erro inesperado: " + err.message);
+    }
   };
 
   const handleComprar = async (e: React.FormEvent) => {
@@ -265,10 +315,10 @@ export const Solicitacoes: React.FC = () => {
 
       if (reqError) throw reqError;
 
-      // 2. Atualizar folga para AGUARDANDO_DECISAO
+      // 2. Atualizar folga para INDENIZACAO_SOLICITADA
       const { error: updError } = await supabase
         .from('compensatory_days')
-        .update({ status: 'AGUARDANDO_DECISAO' })
+        .update({ status: 'INDENIZACAO_SOLICITADA' })
         .eq('id', selectedFolga.id);
 
       if (updError) throw updError;
@@ -277,6 +327,38 @@ export const Solicitacoes: React.FC = () => {
       fetchData(false); // Recarrega tudo para atualizar saldos e tabelas, sem loading na tela toda
     } catch (err: any) {
       alert(err.message || "Erro ao solicitar compra da folga.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openUsufrutoModal = (folga: any) => {
+    setSelectedFolga(folga);
+    setDataUsufruto('');
+    setIsUsufrutoModalOpen(true);
+  };
+
+  const handleRegistrarUsufruto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedFolga || !dataUsufruto) return;
+    
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('compensatory_days')
+        .update({ 
+          status: 'USUFRUIDA', 
+          used_at: dataUsufruto, 
+          usage_registered_by: profile?.id 
+        })
+        .eq('id', selectedFolga.id);
+
+      if (error) throw error;
+
+      setIsUsufrutoModalOpen(false);
+      fetchData(false);
+    } catch (err: any) {
+      alert(err.message || "Erro ao registrar usufruto.");
     } finally {
       setIsSubmitting(false);
     }
@@ -362,7 +444,7 @@ export const Solicitacoes: React.FC = () => {
 
         const { error: updError } = await supabase
           .from('compensatory_days')
-          .update({ status: 'AGUARDANDO_DECISAO' })
+          .update({ status: 'INDENIZACAO_SOLICITADA' })
           .eq('id', folga.id);
 
         if (updError) throw updError;
@@ -466,7 +548,7 @@ export const Solicitacoes: React.FC = () => {
         if (reqData && reqData.compensatory_day_id) {
           const { error: updError } = await supabase
             .from('compensatory_days')
-            .update({ status: 'COMPRADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
+            .update({ status: 'INDENIZADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
             .eq('id', reqData.compensatory_day_id);
           if (updError) throw updError;
         }
@@ -519,7 +601,7 @@ export const Solicitacoes: React.FC = () => {
       if (reqData && reqData.compensatory_day_id) {
         const { error: updError } = await supabase
           .from('compensatory_days')
-          .update({ status: 'COMPRADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
+          .update({ status: 'INDENIZADA', decided_by: profile?.id, decided_at: new Date().toISOString() })
           .eq('id', reqData.compensatory_day_id);
         if (updError) throw updError;
       }
@@ -567,7 +649,7 @@ export const Solicitacoes: React.FC = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'SOLICITADA': return <span className="tag" style={{ background: '#d97706', color: 'white' }}>AGUARDANDO APROVAÇÃO</span>;
-      case 'APROVADA': return <span className="tag" style={{ background: '#059669', color: 'white' }}>APROVADA (COMPRADA)</span>;
+      case 'APROVADA': return <span className="tag" style={{ background: '#059669', color: 'white' }}>APROVADA (INDENIZADA)</span>;
       case 'REJEITADA': return <span className="tag" style={{ background: '#dc2626', color: 'white' }}>REJEITADA</span>;
       default: return <span className="tag">{status}</span>;
     }
@@ -725,9 +807,14 @@ export const Solicitacoes: React.FC = () => {
                         <strong style={{ color: 'var(--color-text)', fontSize: '15px' }}>
                           R$ {((positionValues[f.employees.positions.id] || 0) * f.quantidade_plantoes).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </strong>
-                        <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={() => openCompraModal(f)}>
-                          Solicitar Compra
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button className="btn btn-primary" style={{ padding: '4px 12px', fontSize: '12px' }} onClick={() => openCompraModal(f)}>
+                            Comprar Folga
+                          </button>
+                          <button className="btn" style={{ padding: '4px 12px', fontSize: '12px', background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }} onClick={() => openUsufrutoModal(f)}>
+                            Registrar Gozo
+                          </button>
+                        </div>
                       </div>
                     </div>
                  </div>
@@ -753,6 +840,8 @@ export const Solicitacoes: React.FC = () => {
               </>
             );
           })()}
+
+
         </div>
 
         {(() => {
@@ -761,19 +850,36 @@ export const Solicitacoes: React.FC = () => {
 
           return (
             <div style={{ flex: '2 1 500px', minWidth: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-            <h3 style={{ margin: 0 }}>Solicitações do Ciclo</h3>
-            {selectedRequests.length > 0 && (
-              <button 
-                className="btn btn-primary" 
-                onClick={handleBulkApprove} 
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? 'Aprovando...' : `Aprovar Selecionadas (${selectedRequests.length})`}
-              </button>
-            )}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-divider)' }}>
+            <button 
+              style={{ background: 'none', border: 'none', padding: '8px 16px', fontSize: '15px', fontWeight: 600, color: activeRightTab === 'FINANCEIRO' ? 'var(--color-primary)' : 'var(--color-text-muted)', borderBottom: activeRightTab === 'FINANCEIRO' ? '2px solid var(--color-primary)' : '2px solid transparent', cursor: 'pointer' }}
+              onClick={() => setActiveRightTab('FINANCEIRO')}
+            >
+              Solicitações do Ciclo
+            </button>
+            <button 
+              style={{ background: 'none', border: 'none', padding: '8px 16px', fontSize: '15px', fontWeight: 600, color: activeRightTab === 'USUFRUIDAS' ? 'var(--color-primary)' : 'var(--color-text-muted)', borderBottom: activeRightTab === 'USUFRUIDAS' ? '2px solid var(--color-primary)' : '2px solid transparent', cursor: 'pointer' }}
+              onClick={() => setActiveRightTab('USUFRUIDAS')}
+            >
+              Folgas Usufruídas ({folgasUsufruidas.length})
+            </button>
           </div>
-          <div style={{ marginBottom: 'var(--space-4)', padding: '12px 16px', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '4px', color: '#92400e', fontSize: '13px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+
+          {activeRightTab === 'FINANCEIRO' && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
+                <h3 style={{ margin: 0, visibility: 'hidden' }}>Solicitações do Ciclo</h3>
+                {selectedRequests.length > 0 && (
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={handleBulkApprove} 
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? 'Aprovando...' : `Aprovar Selecionadas (${selectedRequests.length})`}
+                  </button>
+                )}
+              </div>
+              <div style={{ marginBottom: 'var(--space-4)', padding: '12px 16px', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '4px', color: '#92400e', fontSize: '13px', display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '2px' }}>
               <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
               <path d="M12 9v4" />
@@ -840,7 +946,7 @@ export const Solicitacoes: React.FC = () => {
                     <td data-label="Tipo / Qtd." style={{ padding: 'var(--space-3)' }}>
                       {sol.tipo_solicitacao === 'PLANTAO_PLUS' ? (
                         <span style={{ fontSize: '11px', background: 'var(--color-primary)', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>
-                          PL. PLUS
+                          Plantão Plus
                         </span>
                       ) : (
                         <span>{sol.compensatory_days?.quantidade_plantoes + ' folga(s)'}</span>
@@ -891,6 +997,35 @@ export const Solicitacoes: React.FC = () => {
               </div>
             )}
           </div>
+            </>
+          )}
+
+          {activeRightTab === 'USUFRUIDAS' && (
+            <div className="blueprint card elev-sm" style={{ padding: 'var(--space-4)', background: 'var(--color-surface)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {folgasUsufruidas.length === 0 ? (
+                  <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                    Nenhuma folga usufruída registrada neste ciclo.
+                  </div>
+                ) : folgasUsufruidas.map(f => (
+                  <div key={f.id} style={{ padding: 'var(--space-3)', border: '1px solid var(--color-divider)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                    <div>
+                      <strong>{f.employees?.nome} ({f.employees?.matricula})</strong>
+                      <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>{f.employees?.positions?.nome}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontWeight: 600, fontSize: '11px' }}>
+                        Usufruída
+                      </span>
+                      <div style={{ color: 'var(--color-text-muted)', marginTop: '4px', fontSize: '12px' }}>
+                        Em: {f.used_at ? new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR') : '--'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       );
       })()}
@@ -997,6 +1132,50 @@ export const Solicitacoes: React.FC = () => {
                 {confirmAction.confirmText || 'Confirmar'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Usufruto */}
+      {isUsufrutoModalOpen && selectedFolga && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div className="blueprint card elev-md" style={{ width: '400px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>Registrar Gozo</h3>
+            
+            <div style={{ background: 'var(--color-bg)', padding: 'var(--space-3)', borderRadius: '4px', marginBottom: 'var(--space-4)' }}>
+              <div><strong>Servidor:</strong> {selectedFolga.employees?.nome}</div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                O registro de gozo baixa a folga do sistema sem gerar solicitação financeira.
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 'var(--space-4)', padding: '12px', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '4px', color: '#92400e', fontSize: '12px' }}>
+              <strong>⚠️ Responsabilidade da Direção</strong><br/>
+              Ao confirmar o gozo, a direção atesta e garante que esta mesma folga foi ou será devidamente registrada no <strong>Sistema de Ponto Eletrônico</strong> do servidor.
+            </div>
+
+            <form onSubmit={handleRegistrarUsufruto}>
+              <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
+                <label>Data de Descanso do Servidor *</label>
+                <input 
+                  type="date"
+                  className="input"
+                  required
+                  value={dataUsufruto}
+                  onChange={e => setDataUsufruto(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setIsUsufrutoModalOpen(false)} disabled={isSubmitting}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Registrando...' : 'Confirmar Gozo'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

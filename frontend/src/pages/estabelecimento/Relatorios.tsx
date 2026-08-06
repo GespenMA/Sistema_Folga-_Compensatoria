@@ -119,10 +119,14 @@ export const Relatorios: React.FC = () => {
   const loadResumoCiclo = async () => {
     const estId = profile!.establishment_id!;
     
+    const { data: pvs } = await supabase.from('position_values').select('valor, position_id').is('vigencia_fim', null);
+    const pvMap: Record<string, number> = {};
+    if (pvs) pvs.forEach((p: any) => pvMap[p.position_id] = Number(p.valor));
+
     // Busca orcamento da unidade
     const { data: ceData, error: ceErr } = await supabase
       .from('cycle_establishments')
-      .select('total_orcado')
+      .select('total_orcado, planning_limits(quantidade_planejada, position_id)')
       .eq('cycle_id', selectedCycle)
       .eq('establishment_id', estId)
       .maybeSingle();
@@ -132,18 +136,28 @@ export const Relatorios: React.FC = () => {
     // Busca purchase_requests
     const { data: prData, error: prErr } = await supabase
       .from('purchase_requests')
-      .select('valor, status')
+      .select('valor, status, position_id')
       .eq('cycle_id', selectedCycle)
       .eq('establishment_id', estId)
       .in('status', ['APROVADA', 'SOLICITADA']);
       
     if (prErr) throw prErr;
     
-    const aprovadas = (prData || []).filter(p => p.status === 'APROVADA');
-    const pendentes = (prData || []).filter(p => p.status === 'SOLICITADA');
+    const prMapped = (prData || []).map(p => {
+        if (p.position_id && pvMap[p.position_id]) p.valor = pvMap[p.position_id];
+        return p;
+    });
+    
+    const aprovadas = prMapped.filter(p => p.status === 'APROVADA');
+    const pendentes = prMapped.filter(p => p.status === 'SOLICITADA');
     const gasto = aprovadas.reduce((s, p) => s + Number(p.valor), 0);
     const reservado = pendentes.reduce((s, p) => s + Number(p.valor), 0);
-    const totalOrcado = ceData ? Number(ceData.total_orcado) : 0;
+    
+    let totalOrcado = 0;
+    if (ceData && ceData.planning_limits) {
+        ceData.planning_limits.forEach((pl: any) => totalOrcado += (pl.quantidade_planejada || 0) * (pvMap[pl.position_id] || 0));
+    }
+    
     const saldo = totalOrcado - gasto - reservado;
     const pct = totalOrcado > 0 ? ((gasto + reservado) / totalOrcado) * 100 : 0;
     
@@ -226,7 +240,7 @@ export const Relatorios: React.FC = () => {
     for (const c of compData || []) {
       if (!empMap.has(c.employee_id)) continue;
       empMap.get(c.employee_id)!.folgas_geradas++;
-      if (c.status === 'COMPRADA') empMap.get(c.employee_id)!.folgas_compradas_qtd++;
+      if (c.status === 'INDENIZADA') empMap.get(c.employee_id)!.folgas_compradas_qtd++;
     }
 
     // Processa purchase_requests
@@ -386,7 +400,7 @@ export const Relatorios: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: 'var(--space-6)', maxWidth: '1400px', margin: '0 auto' }}>
+    <div style={{ padding: 'var(--space-6)' }}>
       
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
         <div>

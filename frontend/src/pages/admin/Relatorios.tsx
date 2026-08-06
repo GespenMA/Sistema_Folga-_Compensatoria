@@ -183,10 +183,14 @@ export const Relatorios: React.FC = () => {
   // TAB 1: Orçado vs. Gasto
   // -------------------------------------------
   const loadOrcadoGasto = async () => {
+    const { data: pvs } = await supabase.from('position_values').select('valor, position_id').is('vigencia_fim', null);
+    const pvMap: Record<string, number> = {};
+    if (pvs) pvs.forEach((p: any) => pvMap[p.position_id] = Number(p.valor));
+
     // Busca cycle_establishments
     let ceQuery = supabase
       .from('cycle_establishments')
-      .select('id, total_orcado, establishment_id, establishments ( nome )')
+      .select('id, total_orcado, establishment_id, establishments ( nome ), planning_limits(quantidade_planejada, position_id)')
       .eq('cycle_id', selectedCycle);
     if (selectedEst) ceQuery = ceQuery.eq('establishment_id', selectedEst);
     const ceData = await fetchAll(ceQuery);
@@ -194,14 +198,26 @@ export const Relatorios: React.FC = () => {
     // Busca purchase_requests aprovadas e solicitadas para este ciclo
     let prQuery = supabase
       .from('purchase_requests')
-      .select('establishment_id, valor, status')
+      .select('establishment_id, valor, status, position_id')
       .eq('cycle_id', selectedCycle)
       .in('status', ['APROVADA', 'SOLICITADA']);
     if (selectedEst) prQuery = prQuery.eq('establishment_id', selectedEst);
     const prData = await fetchAll(prQuery);
+    
+    if (prData) {
+       prData.forEach((p: any) => {
+         if (p.position_id && pvMap[p.position_id]) p.valor = pvMap[p.position_id];
+       });
+    }
 
     // Agrupa
     const rows: OrcadoGastoRow[] = (ceData || []).map((ce: any) => {
+      let calc = 0;
+      if (ce.planning_limits) {
+          ce.planning_limits.forEach((pl: any) => calc += (pl.quantidade_planejada || 0) * (pvMap[pl.position_id] || 0));
+      }
+      if (calc > 0) ce.total_orcado = calc;
+
       const estId = ce.establishment_id;
       const aprovadas = (prData || []).filter(p => p.establishment_id === estId && p.status === 'APROVADA');
       const pendentes = (prData || []).filter(p => p.establishment_id === estId && p.status === 'SOLICITADA');
@@ -228,9 +244,13 @@ export const Relatorios: React.FC = () => {
   // TAB 2: Detalhamento por Estabelecimento
   // -------------------------------------------
   const loadDetalhEstabelecimento = async () => {
+    const { data: pvs } = await supabase.from('position_values').select('valor, position_id').is('vigencia_fim', null);
+    const pvMap: Record<string, number> = {};
+    if (pvs) pvs.forEach((p: any) => pvMap[p.position_id] = Number(p.valor));
+
     let q = supabase
       .from('purchase_requests')
-      .select('id, establishment_id, valor, status, tipo_solicitacao, data_plantao, justificativa, establishments ( nome ), positions ( codigo, nome ), employees ( matricula, nome ), compensatory_days ( periodo_inicio, periodo_fim )')
+      .select('id, establishment_id, position_id, valor, status, tipo_solicitacao, data_plantao, justificativa, establishments ( nome ), positions ( codigo, nome ), employees ( matricula, nome ), compensatory_days ( periodo_inicio, periodo_fim )')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'APROVADA');
     if (selectedEst) q = q.eq('establishment_id', selectedEst);
@@ -238,6 +258,10 @@ export const Relatorios: React.FC = () => {
     const data = await fetchAll(q);
 
     const rows: DetalhEstRow[] = (data || []).map((row: any) => {
+      if (row.position_id && pvMap[row.position_id]) {
+        row.valor = pvMap[row.position_id];
+      }
+
       let data_detalhe = '—';
       if (row.data_plantao) {
         data_detalhe = new Date(row.data_plantao + 'T12:00:00').toLocaleDateString('pt-BR');
@@ -329,7 +353,7 @@ export const Relatorios: React.FC = () => {
     for (const c of compData || []) {
       if (!empMap.has(c.employee_id)) continue;
       empMap.get(c.employee_id)!.folgas_geradas++;
-      if (c.status === 'COMPRADA') empMap.get(c.employee_id)!.folgas_compradas_qtd++;
+      if (c.status === 'INDENIZADA') empMap.get(c.employee_id)!.folgas_compradas_qtd++;
     }
 
     // Processa purchase_requests

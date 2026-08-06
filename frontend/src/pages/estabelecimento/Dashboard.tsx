@@ -75,16 +75,30 @@ export const EstabelecimentoDashboard: React.FC = () => {
 
         if (estError) throw estError;
 
+        const { data: pvs } = await supabase.from('position_values').select('valor, position_id').is('vigencia_fim', null);
+        const pvMap: Record<string, number> = {};
+        if (pvs) pvs.forEach((p: any) => pvMap[p.position_id] = Number(p.valor));
+
         if (estData) {
           setCycleEst(estData);
 
           // 4. Limites planejados
           const { data: limitsData } = await supabase
             .from('planning_limits')
-            .select('quantidade_planejada, positions ( codigo, nome )')
+            .select('quantidade_planejada, position_id, positions ( codigo, nome )')
             .eq('cycle_establishment_id', estData.id);
-          if (limitsData) setLimits(limitsData);
+            
+          if (limitsData) {
+            setLimits(limitsData);
+            let recalc = 0;
+            limitsData.forEach((l: any) => {
+               recalc += (l.quantidade_planejada || 0) * (pvMap[l.position_id] || 0);
+            });
+            if (recalc > 0) estData.total_orcado = recalc;
+          }
           else setLimits([]);
+          
+          setCycleEst(estData);
         } else {
           setCycleEst(null);
           setLimits([]);
@@ -97,7 +111,14 @@ export const EstabelecimentoDashboard: React.FC = () => {
           .eq('cycle_id', ciclo.id)
           .eq('establishment_id', profile!.establishment_id)
           .order('requested_at', { ascending: false });
-        if (requests) setPurchaseRequests(requests);
+          
+        if (requests) {
+          const processedReqs = (requests as any[]).map(r => {
+            if (r.position_id && pvMap[r.position_id]) r.valor = pvMap[r.position_id];
+            return r;
+          });
+          setPurchaseRequests(processedReqs);
+        }
         else setPurchaseRequests([]);
 
         // 6. Direitos à folga gerados para servidores desta unidade
@@ -188,8 +209,8 @@ export const EstabelecimentoDashboard: React.FC = () => {
   }
 
   // Direitos
-  const rightsUtilizados = compensatoryDays.filter(d => d.status === 'UTILIZADA' || d.status === 'COMPRADA').length;
-  const rightsPendentes = compensatoryDays.filter(d => d.status === 'AGUARDANDO_DECISAO').length;
+  const rightsUtilizados = compensatoryDays.filter(d => d.status === 'USUFRUIDA' || d.status === 'INDENIZADA').length;
+  const rightsPendentes = compensatoryDays.filter(d => d.status === 'INDENIZACAO_SOLICITADA').length;
 
   const getLimit = (codigo: string) => limits.find(lim => lim.positions?.codigo === codigo)?.quantidade_planejada || 0;
   const getConsumido = (codigo: string) => reqAprovadas.filter(r => r.positions?.codigo === codigo).length + reqPendentes.filter(r => r.positions?.codigo === codigo).length;
@@ -461,7 +482,7 @@ export const EstabelecimentoDashboard: React.FC = () => {
                       <Calendar size={20} color="#10b981" /> Registrar Plantões
                    </Link>
                    <Link className="action-btn-large" to="/estabelecimento/servidores" style={{ borderLeft: '4px solid #3b82f6', textDecoration: 'none' }}>
-                      <UserPlus size={20} color="#3b82f6" /> Cadastrar Servidor
+                      <UserPlus size={20} color="#3b82f6" /> Servidores
                    </Link>
                    <Link className="action-btn-large" to="/estabelecimento/solicitacoes" style={{ borderLeft: '4px solid #8b5cf6', textDecoration: 'none' }}>
                       <FilePlus size={20} color="#8b5cf6" /> Solicitar Compra
@@ -540,8 +561,8 @@ export const EstabelecimentoDashboard: React.FC = () => {
                             <td>
                                <span className={`badge ${
                                   day.status === 'GERADA' ? 'badge-blue' :
-                                  day.status === 'UTILIZADA' ? 'badge-gray' :
-                                  day.status === 'COMPRADA' ? 'badge-green' :
+                                  day.status === 'USUFRUIDA' ? 'badge-gray' :
+                                  day.status === 'INDENIZADA' ? 'badge-green' :
                                   'badge-yellow'
                                }`}>
                                   {day.status.replace('_', ' ')}

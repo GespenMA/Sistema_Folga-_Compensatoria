@@ -13,6 +13,7 @@ type PurchaseRequest = {
   requested_at: string;
   rejection_reason: string | null;
   compensatory_day_id: string | null;
+  position_id?: string;
   employees: {
     nome: string;
     matricula: string;
@@ -43,6 +44,9 @@ export const Solicitacoes: React.FC = () => {
   const [selectedCycle, setSelectedCycle] = useState('');
   const [selectedEst, setSelectedEst] = useState('');
   const [selectedStatus, setSelectedStatus] = useState(''); // Default show all
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
   
   const [loading, setLoading] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -99,7 +103,7 @@ export const Solicitacoes: React.FC = () => {
       let q = supabase
         .from('purchase_requests')
         .select(`
-          id, tipo_solicitacao, data_plantao, valor, status, justificativa, requested_at, rejection_reason, compensatory_day_id,
+          id, tipo_solicitacao, data_plantao, valor, status, justificativa, requested_at, rejection_reason, compensatory_day_id, position_id,
           employees ( nome, matricula, positions ( nome ) ),
           establishments ( nome ),
           cycles ( nome )
@@ -112,7 +116,19 @@ export const Solicitacoes: React.FC = () => {
 
       const { data, error } = await q;
       if (error) throw error;
-      setRequests(data as unknown as PurchaseRequest[]);
+      
+      const { data: pvs } = await supabase.from('position_values').select('valor, position_id').is('vigencia_fim', null);
+      const pvMap: Record<string, number> = {};
+      if (pvs) pvs.forEach((p: any) => pvMap[p.position_id] = Number(p.valor));
+
+      const processedData = (data as unknown as PurchaseRequest[]).map(r => {
+        if (r.position_id && pvMap[r.position_id]) {
+          r.valor = pvMap[r.position_id]; // Sobrescreve com o valor de hoje!
+        }
+        return r;
+      });
+
+      setRequests(processedData);
     } catch (e: any) {
       alert('Erro ao carregar solicitações: ' + e.message);
     } finally {
@@ -140,7 +156,7 @@ export const Solicitacoes: React.FC = () => {
       if (req.compensatory_day_id) {
         const { error: compErr } = await supabase
           .from('compensatory_days')
-          .update({ status: 'COMPRADA' })
+          .update({ status: 'INDENIZADA' })
           .eq('id', req.compensatory_day_id);
         if (compErr) throw compErr;
       }
@@ -223,8 +239,16 @@ export const Solicitacoes: React.FC = () => {
 
   const filteredRequests = selectedStatus ? requests.filter(r => r.status === selectedStatus) : requests;
 
+  // Reseta a página para 1 sempre que os filtros mudam
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCycle, selectedEst, selectedStatus, estSearch]);
+
+  const totalPages = Math.ceil(filteredRequests.length / ITEMS_PER_PAGE);
+  const paginatedRequests = filteredRequests.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
   return (
-    <div style={{ padding: 'var(--space-6)', maxWidth: '1400px', margin: '0 auto' }}>
+    <div style={{ width: '100%' }}>
       
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-6)' }}>
         <div>
@@ -375,7 +399,7 @@ export const Solicitacoes: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredRequests.map(req => (
+                {paginatedRequests.map(req => (
                   <tr key={req.id} style={{ borderBottom: '1px solid #e2e8f0', background: '#fff' }}>
                     
                     <td style={{ padding: '16px' }}>
@@ -459,6 +483,22 @@ export const Solicitacoes: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderTop: '1px solid var(--color-border)', background: '#fff' }}>
+                <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                  Mostrando {(currentPage - 1) * ITEMS_PER_PAGE + 1} até {Math.min(currentPage * ITEMS_PER_PAGE, filteredRequests.length)} de {filteredRequests.length} solicitações
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>
+                    Anterior
+                  </button>
+                  <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>
+                    Próxima
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

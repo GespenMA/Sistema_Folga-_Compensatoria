@@ -167,7 +167,7 @@ export const Folgas: React.FC = () => {
       // Busca folgas geradas
       const { data: folgasData } = await supabase
         .from('compensatory_days')
-        .select('id, status, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, cycles(nome)')
+        .select('id, status, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(data_plantao)')
         .eq('employee_id', emp.id)
         .order('generated_at', { ascending: false });
       if (folgasData) setDetailFolgas(folgasData);
@@ -839,7 +839,12 @@ export const Folgas: React.FC = () => {
                       </div>
                       {detailFolgas.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhuma folga gerada ainda.</div>
-                      ) : detailFolgas.map((f: any) => (
+                      ) : detailFolgas.map((f: any) => {
+                        const reqDataPlantao = Array.isArray(f.purchase_requests) 
+                          ? (f.purchase_requests.length > 0 ? f.purchase_requests[0].data_plantao : null) 
+                          : (f.purchase_requests?.data_plantao || null);
+
+                        return (
                         <div key={f.id} style={{
                           padding: '16px', marginBottom: '12px', borderRadius: '8px',
                           background: 'var(--color-bg)', border: '1px solid var(--color-divider)',
@@ -850,11 +855,11 @@ export const Folgas: React.FC = () => {
                               <span>🎉</span> Direito à Folga Compensatória
                             </div>
                             <span style={{
-                              fontSize: '11px', padding: '4px 10px', borderRadius: '12px', fontWeight: 700,
-                              background: f.status === 'GERADA' ? 'rgba(16,185,129,0.1)' : f.status === 'AGUARDANDO_DECISAO' ? 'rgba(234,179,8,0.1)' : 'rgba(239,68,68,0.1)',
-                              color: f.status === 'GERADA' ? '#10b981' : f.status === 'AGUARDANDO_DECISAO' ? '#eab308' : '#ef4444'
+                              padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, display: 'inline-block',
+                              background: f.status === 'GERADA' ? 'rgba(16,185,129,0.1)' : f.status === 'INDENIZACAO_SOLICITADA' ? 'rgba(234,179,8,0.1)' : f.status === 'INDENIZADA' ? 'rgba(59,130,246,0.1)' : 'rgba(239,68,68,0.1)',
+                              color: f.status === 'GERADA' ? '#10b981' : f.status === 'INDENIZACAO_SOLICITADA' ? '#eab308' : f.status === 'INDENIZADA' ? '#3b82f6' : '#ef4444'
                             }}>
-                              {f.status === 'GERADA' ? '✅ Disponível para uso' : f.status === 'AGUARDANDO_DECISAO' ? '⏳ Em aprovação' : f.status}
+                              {f.status === 'GERADA' ? '✅ Disponível para uso' : f.status === 'INDENIZACAO_SOLICITADA' ? '⏳ Indenização em aprovação' : f.status === 'INDENIZADA' ? '💰 Indenizada' : f.status === 'USUFRUIDA' ? '🏖️ Usufruída' : f.status}
                             </span>
                           </div>
                           
@@ -871,16 +876,30 @@ export const Folgas: React.FC = () => {
 
                           <div style={{ height: '1px', background: 'var(--color-divider)', margin: '4px 0' }} />
 
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                              <strong>Período do Ciclo:</strong> {new Date(f.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(f.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                <strong>Período do Ciclo:</strong> {new Date(f.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(f.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                {reqDataPlantao ? (
+                                  <><strong>Data do Plantão:</strong> {new Date(reqDataPlantao + 'T12:00:00Z').toLocaleDateString('pt-BR')}</>
+                                ) : (
+                                  <><strong>Data da Concessão:</strong> {new Date(f.generated_at).toLocaleDateString('pt-BR')}</>
+                                )}
+                              </div>
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
-                              <strong>Data da Concessão:</strong> {new Date(f.generated_at).toLocaleDateString('pt-BR')}
-                            </div>
+                            {f.status === 'USUFRUIDA' && f.used_at && (
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '2px' }}>
+                                <div style={{ fontSize: '11px', color: 'var(--color-primary)' }}>
+                                  <strong>Data de Gozo:</strong> {new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR')}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
