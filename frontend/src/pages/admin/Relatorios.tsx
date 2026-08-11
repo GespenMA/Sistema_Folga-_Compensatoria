@@ -291,19 +291,22 @@ export const Relatorios: React.FC = () => {
   // TAB 3: Folha por Servidor
   // -------------------------------------------
   const loadFolhaServidor = async () => {
-    // 1. Busca shifts no ciclo (plantões trabalhados)
+    // 1. Busca shifts no ciclo (plantões trabalhados). establishment_id é fixo por
+    // registro — onde o plantão aconteceu, não a lotação atual do servidor.
     let shiftQ = supabase
       .from('shifts')
-      .select('employee_id, quantidade_plantoes, minutos_residuais, employees ( id, matricula, nome, saldo_minutos, establishment_id, establishments ( nome ), positions ( codigo, nome ) )')
+      .select('employee_id, quantidade_plantoes, minutos_residuais, establishment_id, establishments ( nome ), employees ( id, matricula, nome, saldo_minutos, positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle);
-    if (selectedEst) shiftQ = shiftQ.eq('employees.establishment_id', selectedEst);
+    if (selectedEst) shiftQ = shiftQ.eq('establishment_id', selectedEst);
     const shiftData = await fetchAll(shiftQ);
 
-    // 2. Busca compensatory_days (folgas geradas)
+    // 2. Busca compensatory_days (folgas geradas). Mesmo princípio: establishment_id
+    // fixo, não a lotação atual do servidor.
     let compQ = supabase
       .from('compensatory_days')
       .select('employee_id, status, quantidade_plantoes')
       .eq('cycle_id', selectedCycle);
+    if (selectedEst) compQ = compQ.eq('establishment_id', selectedEst);
     const compData = await fetchAll(compQ);
 
     // 3. Busca purchase_requests aprovadas
@@ -322,7 +325,6 @@ export const Relatorios: React.FC = () => {
     for (const s of shiftData || []) {
       const emp = (s.employees as any);
       if (!emp) continue;
-      if (selectedEst && emp.establishment_id !== selectedEst) continue;
 
       const empId = emp.id;
       if (!empMap.has(empId)) {
@@ -332,8 +334,8 @@ export const Relatorios: React.FC = () => {
           nome: emp.nome || '',
           cargo_codigo: emp.positions?.codigo || '',
           cargo_nome: emp.positions?.nome || '',
-          establishment_id: emp.establishment_id || '',
-          nome_est: emp.establishments?.nome || '',
+          establishment_id: (s as any).establishment_id || '',
+          nome_est: (s as any).establishments?.nome || '',
           minutos_trabalhados: 0,
           plantoes_trabalhados: 0,
           folgas_geradas: 0,
