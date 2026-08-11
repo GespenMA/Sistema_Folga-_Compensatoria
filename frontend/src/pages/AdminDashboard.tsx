@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { 
-  Wallet, FileText, Landmark, Building2, Calendar, Bell, 
-  Download, Eye, 
-  AlertTriangle, AlertCircle, Info, ArrowRight
+import {
+  Wallet, FileText, Landmark, Building2, Calendar, Bell,
+  Download, Eye,
+  AlertTriangle, AlertCircle, Info, ArrowRight,
+  ChevronUp, ChevronDown, ChevronsUpDown
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -14,6 +15,8 @@ import { useNavigate } from 'react-router-dom';
 type DashboardTab = 'dashboard' | 'detalhamento';
 type UnitStatusFilter = 'Todos' | 'Normal' | 'Atenção' | 'Crítico';
 type LocationFilter = string;
+type UnidadeSortColumn = 'nome' | 'loc' | 'orcamento' | 'consumoPct' | 'gasto' | 'saldo' | 'pendentes' | 'aprovadas' | 'rejeitadas' | 'valorAprov' | 'status';
+type SortDirection = 'asc' | 'desc';
 
 export const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -33,6 +36,8 @@ export const AdminDashboard: React.FC = () => {
   const [searchUnit, setSearchUnit] = useState('');
   const [statusFilter, setStatusFilter] = useState<UnitStatusFilter>('Todos');
   const [locationFilter, setLocationFilter] = useState<LocationFilter>('Todos');
+  const [sortColumn, setSortColumn] = useState<UnidadeSortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const tabRefs = useRef<Record<DashboardTab, HTMLButtonElement | null>>({ dashboard: null, detalhamento: null });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
@@ -319,6 +324,28 @@ export const AdminDashboard: React.FC = () => {
     });
   }, [locationFilter, searchUnit, statusFilter, unidades]);
 
+  const sortedUnidades = useMemo(() => {
+    if (!sortColumn) return filteredUnidades;
+    const sorted = [...filteredUnidades].sort((a, b) => {
+      const valA = a[sortColumn];
+      const valB = b[sortColumn];
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return valA.localeCompare(valB, 'pt-BR');
+      }
+      return (valA as number) - (valB as number);
+    });
+    return sortDirection === 'asc' ? sorted : sorted.reverse();
+  }, [filteredUnidades, sortColumn, sortDirection]);
+
+  const handleSort = (column: UnidadeSortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
   const rankingUnidades = useMemo(() => {
     return [...unidades].sort((a, b) => b.consumoPct - a.consumoPct).slice(0, 5);
   }, [unidades]);
@@ -332,14 +359,14 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleExport = () => {
-    if (filteredUnidades.length === 0) {
+    if (sortedUnidades.length === 0) {
       setActionMessage('Não há unidades para exportar com os filtros atuais.');
       return;
     }
 
     const headers = ['Unidade Penal', 'Localização', 'Orçamento', '% Consumido', 'Valor Consumido', 'Saldo Disponível', 'Pendentes', 'Aprovadas', 'Rejeitadas', 'Valor Aprovado', 'Status'];
     const escapeCsv = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
-    const rows = filteredUnidades.map((unidade) => [
+    const rows = sortedUnidades.map((unidade) => [
       unidade.nome,
       unidade.loc,
       getFormatCurrency(unidade.orcamento),
@@ -362,7 +389,7 @@ export const AdminDashboard: React.FC = () => {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    setActionMessage(`${filteredUnidades.length} unidade(s) exportada(s) com sucesso.`);
+    setActionMessage(`${sortedUnidades.length} unidade(s) exportada(s) com sucesso.`);
   };
 
   // Alertas
@@ -421,6 +448,23 @@ export const AdminDashboard: React.FC = () => {
       case 'Atenção': return <span className="badge badge-orange">{status}</span>;
       default: return <span className="badge badge-green">{status}</span>;
     }
+  };
+
+  const renderSortableHeader = (column: UnidadeSortColumn, label: string, align: 'left' | 'right' | 'center' = 'left') => {
+    const isActive = sortColumn === column;
+    const Icon = isActive ? (sortDirection === 'asc' ? ChevronUp : ChevronDown) : ChevronsUpDown;
+    return (
+      <th
+        style={{ padding: '12px 16px', textAlign: align, cursor: 'pointer', userSelect: 'none' }}
+        onClick={() => handleSort(column)}
+        aria-sort={isActive ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+          {label}
+          <Icon size={14} aria-hidden="true" style={{ opacity: isActive ? 1 : 0.35, flexShrink: 0 }} />
+        </span>
+      </th>
+    );
   };
 
   if (loading) {
@@ -1096,22 +1140,22 @@ export const AdminDashboard: React.FC = () => {
           <table className="modern-table" style={{ whiteSpace: 'nowrap', width: '100%', minWidth: '1200px' }}>
             <thead>
               <tr>
-                <th style={{ padding: '12px 16px' }}>Estabelecimento Penal</th>
-                <th style={{ padding: '12px 16px' }}>Localização</th>
-                <th style={{ textAlign: 'right', padding: '12px 16px' }}>Orçamento</th>
-                <th style={{ textAlign: 'center', padding: '12px 16px' }}>% Consumido</th>
-                <th style={{ textAlign: 'right', padding: '12px 16px' }}>Valor Consumido</th>
-                <th style={{ textAlign: 'right', padding: '12px 16px' }}>Saldo Disponível</th>
-                <th style={{ textAlign: 'center', padding: '12px 16px' }}>Pendentes</th>
-                <th style={{ textAlign: 'center', padding: '12px 16px' }}>Aprovadas</th>
-                <th style={{ textAlign: 'center', padding: '12px 16px' }}>Rejeitadas</th>
-                <th style={{ textAlign: 'right', padding: '12px 16px' }}>Valor Aprov.</th>
-                <th style={{ padding: '12px 16px' }}>Status</th>
+                {renderSortableHeader('nome', 'Estabelecimento Penal')}
+                {renderSortableHeader('loc', 'Localização')}
+                {renderSortableHeader('orcamento', 'Orçamento', 'right')}
+                {renderSortableHeader('consumoPct', '% Consumido', 'center')}
+                {renderSortableHeader('gasto', 'Valor Consumido', 'right')}
+                {renderSortableHeader('saldo', 'Saldo Disponível', 'right')}
+                {renderSortableHeader('pendentes', 'Pendentes', 'center')}
+                {renderSortableHeader('aprovadas', 'Aprovadas', 'center')}
+                {renderSortableHeader('rejeitadas', 'Rejeitadas', 'center')}
+                {renderSortableHeader('valorAprov', 'Valor Aprov.', 'right')}
+                {renderSortableHeader('status', 'Status')}
                 <th style={{ textAlign: 'center', padding: '12px 16px' }}>Ações</th>
               </tr>
             </thead>
             <tbody>
-              {filteredUnidades.map(u => (
+              {sortedUnidades.map(u => (
                 <tr key={u.id}>
                   <td style={{ fontWeight: 600, padding: '12px 16px' }}>{u.nome}</td>
                   <td style={{ padding: '12px 16px' }}>{u.loc}</td>
