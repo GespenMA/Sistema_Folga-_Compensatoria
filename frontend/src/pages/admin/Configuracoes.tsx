@@ -72,7 +72,7 @@ export const Configuracoes: React.FC = () => {
   // Estados para Importação Mensal
   // =============================================
   type PreviewRow = { matricula: string; nome: string; cargo: string; dataAdmissao: string; estabelecimento: string; trabalhadas: string; minutosNovos: number; plantoes: number; minutosResiduo: number; erros: string[] };
-  type ImportResult = { importados: number; atualizados: number; shiftsInseridos: number; erros: string[] };
+  type ImportResult = { importados: number; atualizados: number; transferidos: number; shiftsInseridos: number; transferenciasDetalhe: string[]; erros: string[] };
 
   const [activeCycleForImport, setActiveCycleForImport] = useState<{ id: string; nome: string; data_inicio: string; data_fim: string } | null>(null);
   const [loadingImportCycle, setLoadingImportCycle] = useState(false);
@@ -564,12 +564,16 @@ export const Configuracoes: React.FC = () => {
       const estMap = new Map<string, string>();
       ests?.forEach(e => estMap.set(normalizeStr(e.nome), e.id));
 
+      const estIdToNome = new Map<string, string>();
+      ests?.forEach(e => estIdToNome.set(e.id, e.nome));
+
       const posMap = new Map<string, string>();
       positions?.forEach(p => posMap.set(normalizeStr(p.nome), p.id));
 
       const MINUTOS_POR_PLANTAO = 720;
-      let importados = 0, atualizados = 0, shiftsInseridos = 0;
+      let importados = 0, atualizados = 0, transferidos = 0, shiftsInseridos = 0;
       const erros: string[] = [];
+      const transferenciasDetalhe: string[] = [];
 
       for (let i = 0; i < importPreview.length; i++) {
         const row = importPreview[i];
@@ -587,14 +591,16 @@ export const Configuracoes: React.FC = () => {
         if (!estId) { erros.push(`Estabelecimento não encontrado: "${row.estabelecimento}" (${row.nome})`); continue; }
         if (!posId) { erros.push(`Cargo não encontrado: "${row.cargo}" (${row.nome})`); continue; }
 
-        // Buscar servidor existente com saldo de minutos atual
+        // Busca por matrícula globalmente — matrícula é identificador único do
+        // servidor na SEAP, não escopado por estabelecimento. Isso é o que permite
+        // reconhecer o mesmo servidor quando ele é transferido de unidade.
         const { data: existingEmp } = await supabase
           .from('employees')
-          .select('id, saldo_minutos')
-          .eq('establishment_id', estId)
+          .select('id, saldo_minutos, establishment_id')
           .eq('matricula', row.matricula)
           .maybeSingle();
 
+        const isTransfer = !!existingEmp && existingEmp.establishment_id !== estId;
         let saldoMinutosBase = existingEmp?.saldo_minutos ?? 0;
 
         // -----------------------------------------------------------------------
@@ -628,11 +634,28 @@ export const Configuracoes: React.FC = () => {
         const plantoesTotal = Math.floor(totalMinutos / MINUTOS_POR_PLANTAO);
         const novoSaldoMinutos = totalMinutos % MINUTOS_POR_PLANTAO;
 
-        // Upsert do servidor com novo saldo_minutos
-        const { data: empData, error: empError } = await supabase
-          .from('employees')
-          .upsert(
-            {
+        // INSERT/UPDATE explícito (não upsert) — cobre atualização normal E
+        // transferência sem depender de qual constraint única existe no momento
+        // do deploy (ver migration de constraint em database/19_*).
+        let empId: string | undefined;
+        if (existingEmp) {
+          const { error: empError } = await supabase
+            .from('employees')
+            .update({
+              establishment_id: estId,
+              nome: row.nome,
+              position_id: posId,
+              ativo: true,
+              data_admissao: row.dataAdmissao,
+              saldo_minutos: novoSaldoMinutos
+            })
+            .eq('id', existingEmp.id);
+          if (empError) { erros.push(`Erro ao salvar servidor ${row.nome}: ${empError.message}`); continue; }
+          empId = existingEmp.id;
+        } else {
+          const { data: empData, error: empError } = await supabase
+            .from('employees')
+            .insert({
               establishment_id: estId,
               matricula: row.matricula,
               nome: row.nome,
@@ -640,23 +663,29 @@ export const Configuracoes: React.FC = () => {
               ativo: true,
               data_admissao: row.dataAdmissao,
               saldo_minutos: novoSaldoMinutos
-            },
-            { onConflict: 'establishment_id,matricula', ignoreDuplicates: false }
-          )
-          .select('id')
-          .single();
+            })
+            .select('id')
+            .single();
+          if (empError || !empData) { erros.push(`Erro ao salvar servidor ${row.nome}: ${empError?.message}`); continue; }
+          empId = empData.id;
+        }
 
-        const empId = empData?.id ?? existingEmp?.id;
-        if (!empId) { erros.push(`Erro ao salvar servidor ${row.nome}: ${empError?.message}`); continue; }
+        if (!existingEmp) {
+          importados++;
+        } else if (isTransfer) {
+          transferidos++;
+          transferenciasDetalhe.push(`${row.nome} (matrícula ${row.matricula}): ${estIdToNome.get(existingEmp.establishment_id) || existingEmp.establishment_id} → ${row.estabelecimento}`);
+        } else {
+          atualizados++;
+        }
 
-        if (!existingEmp) importados++;
-        else atualizados++;
-
-        // Inserir shift — seguro pois os shifts antigos foram deletados acima
+        // Inserir shift — seguro pois os shifts antigos foram deletados acima.
+        // establishment_id fixa para sempre onde este plantão aconteceu.
         if (plantoesTotal > 0) {
           const { error: shiftErr } = await supabase.from('shifts').insert({
             employee_id: empId,
             cycle_id: activeCycleForImport.id,
+            establishment_id: estId,
             periodo_inicio: activeCycleForImport.data_inicio,
             periodo_fim: activeCycleForImport.data_fim,
             quantidade_plantoes: plantoesTotal,
@@ -667,7 +696,7 @@ export const Configuracoes: React.FC = () => {
         }
       }
 
-      setImportResult({ importados, atualizados, shiftsInseridos, erros });
+      setImportResult({ importados, atualizados, transferidos, shiftsInseridos, transferenciasDetalhe, erros });
       setImportStep('done');
     } catch (err: any) {
       alert('Erro durante a importação: ' + (err.message || err));
@@ -1027,7 +1056,7 @@ export const Configuracoes: React.FC = () => {
                 {importStep === 'done' && importResult && (
                   <div>
                     <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '20px' }}>✅ Importação Concluída!</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
                       <div style={{ padding: '16px', background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '8px', textAlign: 'center' }}>
                         <div style={{ fontSize: '28px', fontWeight: 800, color: '#16a34a' }}>{importResult.importados}</div>
                         <div style={{ fontSize: '12px', color: '#15803d', marginTop: '4px' }}>Servidores Novos</div>
@@ -1036,11 +1065,24 @@ export const Configuracoes: React.FC = () => {
                         <div style={{ fontSize: '28px', fontWeight: 800, color: '#2563eb' }}>{importResult.atualizados}</div>
                         <div style={{ fontSize: '12px', color: '#1d4ed8', marginTop: '4px' }}>Servidores Atualizados</div>
                       </div>
+                      <div style={{ padding: '16px', background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '8px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '28px', fontWeight: 800, color: '#9333ea' }}>{importResult.transferidos}</div>
+                        <div style={{ fontSize: '12px', color: '#7e22ce', marginTop: '4px' }}>Servidores Transferidos</div>
+                      </div>
                       <div style={{ padding: '16px', background: '#fefce8', border: '1px solid #fde047', borderRadius: '8px', textAlign: 'center' }}>
                         <div style={{ fontSize: '28px', fontWeight: 800, color: '#ca8a04' }}>{importResult.shiftsInseridos}</div>
                         <div style={{ fontSize: '12px', color: '#a16207', marginTop: '4px' }}>Registros de Plantões</div>
                       </div>
                     </div>
+
+                    {importResult.transferenciasDetalhe.length > 0 && (
+                      <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
+                        <div style={{ fontWeight: 700, color: '#7e22ce', marginBottom: '8px' }}>🔄 {importResult.transferenciasDetalhe.length} transferência(s) detectada(s):</div>
+                        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                          {importResult.transferenciasDetalhe.map((t, i) => <div key={i} style={{ fontSize: '12px', color: '#6b21a8', marginBottom: '4px' }}>• {t}</div>)}
+                        </div>
+                      </div>
+                    )}
 
                     {importResult.erros.length > 0 && (
                       <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
