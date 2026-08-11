@@ -172,21 +172,22 @@ export const Relatorios: React.FC = () => {
 
   const loadFolhaServidor = async () => {
     const estId = profile!.establishment_id!;
-    
-    // 1. Busca shifts no ciclo
+
+    // 1. Busca shifts no ciclo. establishment_id é fixo por registro — onde o
+    // plantão aconteceu, não a lotação atual do servidor.
     const { data: shiftData, error: shiftErr } = await supabase
       .from('shifts')
-      .select('employee_id, quantidade_plantoes, employees!inner(id, matricula, nome, saldo_minutos, establishment_id, positions(codigo, nome))')
+      .select('employee_id, quantidade_plantoes, employees!inner(id, matricula, nome, saldo_minutos, positions(codigo, nome))')
       .eq('cycle_id', selectedCycle)
-      .eq('employees.establishment_id', estId);
+      .eq('establishment_id', estId);
     if (shiftErr) throw shiftErr;
 
-    // 2. Busca compensatory_days
+    // 2. Busca compensatory_days. Mesmo princípio.
     const { data: compData, error: compErr } = await supabase
       .from('compensatory_days')
-      .select('employee_id, status, quantidade_plantoes, employees!inner(establishment_id)')
+      .select('employee_id, status, quantidade_plantoes')
       .eq('cycle_id', selectedCycle)
-      .eq('employees.establishment_id', estId);
+      .eq('establishment_id', estId);
     if (compErr) throw compErr;
 
     // 3. Busca purchase_requests
