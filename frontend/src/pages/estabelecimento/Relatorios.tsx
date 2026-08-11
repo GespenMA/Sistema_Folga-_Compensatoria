@@ -34,12 +34,14 @@ type FolhaServidorRow = {
   valor_plantao_plus: number;
   total_a_pagar: number;
   saldo_minutos: number;
+  datas_plantao: string[];
 };
 
 // =============================================
 // HELPERS
 // =============================================
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
 
 // =============================================
 // COMPONENTE PRINCIPAL
@@ -193,7 +195,7 @@ export const Relatorios: React.FC = () => {
     // 3. Busca purchase_requests
     let prQ = supabase
       .from('purchase_requests')
-      .select('employee_id, valor, tipo_solicitacao')
+      .select('employee_id, valor, tipo_solicitacao, data_plantao')
       .eq('cycle_id', selectedCycle)
       .eq('establishment_id', estId)
       .eq('status', 'APROVADA');
@@ -232,6 +234,7 @@ export const Relatorios: React.FC = () => {
           valor_plantao_plus: 0,
           total_a_pagar: 0,
           saldo_minutos: emp.saldo_minutos || 0,
+          datas_plantao: [],
         });
       }
       empMap.get(empId)!.plantoes_trabalhados += Number(s.quantidade_plantoes);
@@ -254,9 +257,11 @@ export const Relatorios: React.FC = () => {
         empMap.get(p.employee_id)!.valor_folga_comp += Number(p.valor);
       }
       empMap.get(p.employee_id)!.total_a_pagar += Number(p.valor);
+      if (p.data_plantao) empMap.get(p.employee_id)!.datas_plantao.push(p.data_plantao);
     }
 
     const rows = Array.from(empMap.values());
+    rows.forEach(r => r.datas_plantao.sort());
     rows.sort((a, b) => a.nome.localeCompare(b.nome));
     setFolhaData(rows);
   };
@@ -311,6 +316,7 @@ export const Relatorios: React.FC = () => {
       'Matrícula': r.matricula,
       'Servidor': r.nome,
       'Cargo': r.cargo_nome,
+      'Data(s) do Plantão': r.datas_plantao.length > 0 ? r.datas_plantao.map(d => fmtDate(d)).join(', ') : '',
       'Plantões Trab.': r.plantoes_trabalhados,
       'Folgas Geradas': r.folgas_geradas,
       'Folgas Pagas (Qtd)': r.folgas_compradas_qtd,
@@ -351,6 +357,7 @@ export const Relatorios: React.FC = () => {
         r.matricula,
         r.nome,
         r.cargo_nome,
+        r.datas_plantao.length > 0 ? r.datas_plantao.map(d => fmtDate(d)).join(', ') : '—',
         r.folgas_compradas_qtd.toString(),
         fmt(r.valor_folga_comp),
         r.plantao_plus_qtd.toString(),
@@ -360,24 +367,24 @@ export const Relatorios: React.FC = () => {
 
       // Adiciona linha de totais
       tableData.push([
-        '', 'TOTAIS', '', '', 
-        fmt(totFolha.valor_folga_comp), 
-        '', 
-        fmt(totFolha.valor_plantao_plus), 
+        '', 'TOTAIS', '', '', '',
+        fmt(totFolha.valor_folga_comp),
+        '',
+        fmt(totFolha.valor_plantao_plus),
         fmt(totFolha.total_a_pagar)
       ]);
 
       autoTable(doc, {
         startY: 40,
-        head: [['Matrícula', 'Servidor', 'Cargo', 'Qtd Folga', 'R$ Folga', 'Qtd Pl+', 'R$ Pl+', 'Total (R$)']],
+        head: [['Matrícula', 'Servidor', 'Cargo', 'Data(s) Plantão', 'Qtd Folga', 'R$ Folga', 'Qtd Pl+', 'R$ Pl+', 'Total (R$)']],
         body: tableData,
         theme: 'striped',
         styles: { fontSize: 8, cellPadding: 3 },
         headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold' },
         columnStyles: {
-          4: { halign: 'right' },
-          6: { halign: 'right' },
-          7: { halign: 'right', fontStyle: 'bold' }
+          5: { halign: 'right' },
+          7: { halign: 'right' },
+          8: { halign: 'right', fontStyle: 'bold' }
         },
         willDrawCell: function (data) {
           // Destaca a última linha (Totais)
@@ -559,6 +566,7 @@ export const Relatorios: React.FC = () => {
                 <thead>
                   <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
                     <th style={{ padding: '12px 16px', fontWeight: 600 }}>Servidor</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Data(s) do Plantão</th>
                     <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>Pl. Trab.</th>
                     <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>Folga Ger.</th>
                     <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Qtd. FC</th>
@@ -571,7 +579,7 @@ export const Relatorios: React.FC = () => {
                 <tbody>
                   {filteredFolha.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
+                      <td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
                         Nenhum registro encontrado para os filtros selecionados.
                       </td>
                     </tr>
@@ -583,6 +591,7 @@ export const Relatorios: React.FC = () => {
                             <div style={{ fontWeight: 500, color: '#0f172a' }}>{r.nome}</div>
                             <div style={{ fontSize: '11px', color: '#64748b' }}>Mat: {r.matricula} | {r.cargo_nome}</div>
                           </td>
+                          <td style={{ padding: '12px 16px', fontSize: '12px' }}>{r.datas_plantao.length > 0 ? r.datas_plantao.map(d => fmtDate(d)).join(', ') : '—'}</td>
                           <td style={{ padding: '12px 16px', textAlign: 'center' }}>{r.plantoes_trabalhados}</td>
                           <td style={{ padding: '12px 16px', textAlign: 'center' }}>{r.folgas_geradas}</td>
                           <td style={{ padding: '12px 16px', textAlign: 'right' }}>{r.folgas_compradas_qtd}</td>
@@ -596,7 +605,7 @@ export const Relatorios: React.FC = () => {
                       ))}
                       {/* Linha de Totalizadores (Mostra o total global, não só da página) */}
                       <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0', fontWeight: 600 }}>
-                        <td colSpan={4} style={{ padding: '12px 16px', textAlign: 'right', color: '#475569' }}>TOTAIS APROVADOS DA UNIDADE:</td>
+                        <td colSpan={5} style={{ padding: '12px 16px', textAlign: 'right', color: '#475569' }}>TOTAIS APROVADOS DA UNIDADE:</td>
                         <td style={{ padding: '12px 16px', textAlign: 'right', color: '#0f172a' }}>{fmt(totFolha.valor_folga_comp)}</td>
                         <td style={{ padding: '12px 16px' }}></td>
                         <td style={{ padding: '12px 16px', textAlign: 'right', color: '#0f172a' }}>{fmt(totFolha.valor_plantao_plus)}</td>

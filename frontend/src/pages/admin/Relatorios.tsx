@@ -54,6 +54,7 @@ type FolhaServidorRow = {
   valor_plantao_plus: number;
   total_a_pagar: number;
   saldo_minutos: number;
+  datas_plantao: string[];
 };
 
 type ActiveTab = 'orcado_gasto' | 'detalhe_est' | 'folha_servidor';
@@ -312,7 +313,7 @@ export const Relatorios: React.FC = () => {
     // 3. Busca purchase_requests aprovadas
     let prQ = supabase
       .from('purchase_requests')
-      .select('employee_id, valor, tipo_solicitacao')
+      .select('employee_id, valor, tipo_solicitacao, data_plantao')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'APROVADA');
     if (selectedEst) prQ = prQ.eq('establishment_id', selectedEst);
@@ -345,6 +346,7 @@ export const Relatorios: React.FC = () => {
           valor_plantao_plus: 0,
           total_a_pagar: 0,
           saldo_minutos: emp.saldo_minutos || 0,
+          datas_plantao: [],
         });
       }
       empMap.get(empId)!.plantoes_trabalhados += Number(s.quantidade_plantoes || 0);
@@ -367,11 +369,13 @@ export const Relatorios: React.FC = () => {
       } else {
         empMap.get(p.employee_id)!.valor_folga_comp += Number(p.valor);
       }
+      if (p.data_plantao) empMap.get(p.employee_id)!.datas_plantao.push(p.data_plantao);
     }
 
-    // Calcula total a pagar
+    // Calcula total a pagar e ordena as datas de plantão cronologicamente
     for (const row of empMap.values()) {
       row.total_a_pagar = row.valor_folga_comp + row.valor_plantao_plus;
+      row.datas_plantao.sort();
     }
 
     let rows = Array.from(empMap.values()).sort((a, b) => a.nome_est.localeCompare(b.nome_est) || a.nome.localeCompare(b.nome));
@@ -481,6 +485,7 @@ export const Relatorios: React.FC = () => {
         'Nome do Servidor': r.nome,
         'Cargo': r.cargo_nome,
         'Estabelecimento Penal': r.nome_est,
+        'Data(s) do Plantão': r.datas_plantao.length > 0 ? r.datas_plantao.map(d => fmtDate(d)).join(', ') : '',
         'Horas Trabalhadas': `${Math.floor(r.minutos_trabalhados / 60)}h${(r.minutos_trabalhados % 60).toString().padStart(2, '0')}`,
         'Plantões Trabalhados': r.plantoes_trabalhados,
         'Folgas Geradas': r.folgas_geradas,
@@ -589,13 +594,14 @@ export const Relatorios: React.FC = () => {
         const totalPagar = folhaFiltered.reduce((s, r) => s + r.total_a_pagar, 0);
         autoTable(doc, {
           startY: 36,
-          head: [['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR']],
+          head: [['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Data(s) Plantão', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR']],
           body: [
             ...folhaFiltered.map(r => [
               r.matricula,
               r.nome,
               r.cargo_codigo,
               r.nome_est,
+              r.datas_plantao.length > 0 ? r.datas_plantao.map(d => fmtDate(d)).join(', ') : '—',
               `${Math.floor(r.minutos_trabalhados / 60)}h${(r.minutos_trabalhados % 60).toString().padStart(2, '0')}`,
               r.plantoes_trabalhados.toString(),
               r.folgas_geradas.toString(),
@@ -605,12 +611,12 @@ export const Relatorios: React.FC = () => {
               fmt(r.valor_plantao_plus),
               fmt(r.total_a_pagar),
             ]),
-            ['', 'TOTAL GERAL', '', '', '', '', '', '', '', '', '', fmt(totalPagar)],
+            ['', 'TOTAL GERAL', '', '', '', '', '', '', '', '', '', '', fmt(totalPagar)],
           ],
           headStyles: { fillColor: [124, 58, 237], textColor: 255, fontSize: 7, fontStyle: 'bold' },
           bodyStyles: { fontSize: 7 },
           alternateRowStyles: { fillColor: [245, 243, 255] },
-          columnStyles: { 11: { fontStyle: 'bold', textColor: [5, 150, 105] } },
+          columnStyles: { 12: { fontStyle: 'bold', textColor: [5, 150, 105] } },
           didParseCell: (data) => {
             if (data.row.index === folhaFiltered.length) {
               data.cell.styles.fontStyle = 'bold';
@@ -969,8 +975,8 @@ export const Relatorios: React.FC = () => {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                   <thead>
                     <tr style={{ background: '#7c3aed' }}>
-                      {['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', color: '#fff', fontWeight: 600, fontSize: '10px', textTransform: 'uppercase', textAlign: ['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento'].includes(h) ? 'left' : 'right', whiteSpace: 'nowrap' }}>{h}</th>
+                      {['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Data(s) do Plantão', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', color: '#fff', fontWeight: 600, fontSize: '10px', textTransform: 'uppercase', textAlign: ['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Data(s) do Plantão'].includes(h) ? 'left' : 'right', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -983,6 +989,7 @@ export const Relatorios: React.FC = () => {
                           <span style={{ padding: '2px 8px', borderRadius: '4px', background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '10px' }}>{r.cargo_codigo}</span>
                         </td>
                         <td style={{ padding: '9px 12px', color: '#475569', fontSize: '11px' }}>{r.nome_est}</td>
+                        <td style={{ padding: '9px 12px', fontSize: '11px' }}>{r.datas_plantao.length > 0 ? r.datas_plantao.map(d => fmtDate(d)).join(', ') : '—'}</td>
                         <td style={{ padding: '9px 12px', textAlign: 'right', fontWeight: 600 }}>{Math.floor(r.minutos_trabalhados / 60)}h{(r.minutos_trabalhados % 60).toString().padStart(2, '0')}</td>
                         <td style={{ padding: '9px 12px', textAlign: 'right' }}>{r.plantoes_trabalhados}</td>
                         <td style={{ padding: '9px 12px', textAlign: 'right' }}>{r.folgas_geradas}</td>
@@ -996,7 +1003,7 @@ export const Relatorios: React.FC = () => {
                   </tbody>
                   <tfoot>
                     <tr style={{ background: '#7c3aed', color: '#fff' }}>
-                      <td colSpan={4} style={{ padding: '10px 12px', fontWeight: 700 }}>TOTAL GERAL — {folhaFiltered.length} servidor(es)</td>
+                      <td colSpan={5} style={{ padding: '10px 12px', fontWeight: 700 }}>TOTAL GERAL — {folhaFiltered.length} servidor(es)</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + Math.floor(r.minutos_trabalhados / 60), 0)}h</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.plantoes_trabalhados, 0)}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 700 }}>{folhaFiltered.reduce((s, r) => s + r.folgas_geradas, 0)}</td>
