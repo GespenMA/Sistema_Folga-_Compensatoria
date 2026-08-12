@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
-import { FileText, FileSpreadsheet, Filter, Users, DollarSign, Building2, TrendingUp, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, FileSpreadsheet, Filter, Users, DollarSign, Building2, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, CalendarCheck } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -37,6 +37,17 @@ type FolhaServidorRow = {
   datas_plantao: string[];
 };
 
+type UsufrutoRow = {
+  id: string;
+  employee_id: string;
+  matricula: string;
+  nome_servidor: string;
+  cargo_nome: string;
+  ciclo_nome: string;
+  data_usufruto: string;
+  registrado_por: string;
+};
+
 // =============================================
 // HELPERS
 // =============================================
@@ -59,9 +70,11 @@ export const Relatorios: React.FC = () => {
   // Dados brutos
   const [resumoData, setResumoData] = useState<ResumoCiclo | null>(null);
   const [folhaData, setFolhaData] = useState<FolhaServidorRow[]>([]);
+  const [usufrutoData, setUsufrutoData] = useState<UsufrutoRow[]>([]);
 
   // Paginação
   const [currentPage, setCurrentPage] = useState(1);
+  const [currentPageUsufruto, setCurrentPageUsufruto] = useState(1);
   const itemsPerPage = 10;
 
   const [loading, setLoading] = useState(false);
@@ -109,7 +122,8 @@ export const Relatorios: React.FC = () => {
     try {
       await Promise.all([
         loadResumoCiclo(),
-        loadFolhaServidor()
+        loadFolhaServidor(),
+        loadUsufruto()
       ]);
     } catch (e: any) {
       setErrorMsg(e?.message || 'Erro ao carregar dados.');
@@ -266,6 +280,34 @@ export const Relatorios: React.FC = () => {
     setFolhaData(rows);
   };
 
+  const loadUsufruto = async () => {
+    const estId = profile!.establishment_id!;
+
+    let q = supabase
+      .from('compensatory_days')
+      .select('id, used_at, cycle_id, employees!inner ( id, matricula, nome, position_id, positions ( nome ) ), cycles ( nome ), profiles!usage_registered_by ( nome )')
+      .eq('cycle_id', selectedCycle)
+      .eq('establishment_id', estId)
+      .eq('status', 'USUFRUIDA');
+    if (selectedCargo) q = q.eq('employees.position_id', selectedCargo);
+
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const rows: UsufrutoRow[] = (data || []).map((row: any) => ({
+      id: row.id,
+      employee_id: row.employees?.id || '',
+      matricula: row.employees?.matricula || '—',
+      nome_servidor: row.employees?.nome || '—',
+      cargo_nome: row.employees?.positions?.nome || '—',
+      ciclo_nome: row.cycles?.nome || '—',
+      data_usufruto: row.used_at ? fmtDate(row.used_at) : '—',
+      registrado_por: row.profiles?.nome || '—',
+    }));
+    rows.sort((a, b) => a.nome_servidor.localeCompare(b.nome_servidor));
+    setUsufrutoData(rows);
+  };
+
   // -------------------------------------------
   // DADOS FILTRADOS
   // -------------------------------------------
@@ -305,6 +347,61 @@ export const Relatorios: React.FC = () => {
       return acc;
     }, { valor_folga_comp: 0, valor_plantao_plus: 0, total_a_pagar: 0 });
   }, [filteredFolha]);
+
+  const totalPagesUsufruto = Math.ceil(usufrutoData.length / itemsPerPage);
+  const paginatedUsufruto = useMemo(() => {
+    const startIndex = (currentPageUsufruto - 1) * itemsPerPage;
+    return usufrutoData.slice(startIndex, startIndex + itemsPerPage);
+  }, [usufrutoData, currentPageUsufruto]);
+
+  const exportUsufrutoExcel = () => {
+    const data = usufrutoData.map(r => ({
+      'Servidor': r.nome_servidor,
+      'Matrícula': r.matricula,
+      'Cargo': r.cargo_nome,
+      'Ciclo': r.ciclo_nome,
+      'Data de Usufruto': r.data_usufruto,
+      'Registrado por': r.registrado_por,
+    }));
+    if (data.length === 0) return alert('Nenhum dado para exportar.');
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Folgas Usufruidas");
+    XLSX.writeFile(wb, `Folgas_Usufruidas_${getSelectedCycleObj()?.nome || 'Ciclo'}.xlsx`);
+  };
+
+  const exportUsufrutoPDF = () => {
+    if (usufrutoData.length === 0) return alert('Nenhum dado para exportar.');
+    setExportingPdf(true);
+    try {
+      const doc = new jsPDF('l', 'mm', 'a4');
+      const cycleObj = getSelectedCycleObj();
+
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text('SEAP — Compensa+', 14, 16);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 282, 16, { align: 'right' });
+
+      doc.setFontSize(16);
+      doc.setTextColor(40);
+      doc.text(`Folgas Usufruídas - Unidade`, 14, 26);
+      doc.setFontSize(11);
+      doc.text(`Ciclo: ${cycleObj?.nome || 'Não definido'}`, 14, 32);
+
+      autoTable(doc, {
+        startY: 40,
+        head: [['Servidor', 'Matrícula', 'Cargo', 'Ciclo', 'Data de Usufruto', 'Registrado por']],
+        body: usufrutoData.map(r => [r.nome_servidor, r.matricula, r.cargo_nome, r.ciclo_nome, r.data_usufruto, r.registrado_por]),
+        theme: 'striped',
+        styles: { fontSize: 8, cellPadding: 3 },
+        headStyles: { fillColor: [8, 145, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
+      });
+
+      doc.save(`Folgas_Usufruidas_${cycleObj?.nome || 'Ciclo'}.pdf`);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   // -------------------------------------------
   // EXPORTAÇÕES
@@ -634,6 +731,91 @@ export const Relatorios: React.FC = () => {
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
                       style={{ padding: '6px 12px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#334155' }}
+                    >
+                      Próxima <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* TABELA: FOLGAS USUFRUÍDAS */}
+          <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', marginTop: '24px' }}>
+
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--color-text-base)' }}>
+                <CalendarCheck size={18} color="#0891b2" />
+                Folgas Usufruídas
+              </div>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={exportUsufrutoExcel}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#16a34a', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
+                >
+                  <FileSpreadsheet size={16} /> Excel
+                </button>
+                <button
+                  onClick={exportUsufrutoPDF}
+                  disabled={exportingPdf}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#dc2626', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 500, opacity: exportingPdf ? 0.7 : 1 }}
+                >
+                  <FileText size={16} /> {exportingPdf ? 'Gerando...' : 'PDF'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Servidor</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Matrícula</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Cargo</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Ciclo</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Data de Usufruto</th>
+                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Registrado por</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usufrutoData.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
+                        Nenhuma folga usufruída registrada para os filtros selecionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedUsufruto.map(r => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0', background: '#fff' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 500, color: '#0f172a' }}>{r.nome_servidor}</td>
+                        <td style={{ padding: '12px 16px', color: '#64748b' }}>{r.matricula}</td>
+                        <td style={{ padding: '12px 16px' }}>{r.cargo_nome}</td>
+                        <td style={{ padding: '12px 16px' }}>{r.ciclo_nome}</td>
+                        <td style={{ padding: '12px 16px', fontWeight: 600, color: '#0e7490' }}>{r.data_usufruto}</td>
+                        <td style={{ padding: '12px 16px', color: '#64748b' }}>{r.registrado_por}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+
+              {totalPagesUsufruto > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderTop: '1px solid var(--color-border)', background: '#f8fafc' }}>
+                  <div style={{ fontSize: '13px', color: '#64748b' }}>
+                    Mostrando {(currentPageUsufruto - 1) * itemsPerPage + 1} até {Math.min(currentPageUsufruto * itemsPerPage, usufrutoData.length)} de {usufrutoData.length} registros
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => setCurrentPageUsufruto(p => Math.max(1, p - 1))}
+                      disabled={currentPageUsufruto === 1}
+                      style={{ padding: '6px 12px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: currentPageUsufruto === 1 ? 'not-allowed' : 'pointer', opacity: currentPageUsufruto === 1 ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#334155' }}
+                    >
+                      <ChevronLeft size={16} /> Anterior
+                    </button>
+                    <button
+                      onClick={() => setCurrentPageUsufruto(p => Math.min(totalPagesUsufruto, p + 1))}
+                      disabled={currentPageUsufruto === totalPagesUsufruto}
+                      style={{ padding: '6px 12px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: currentPageUsufruto === totalPagesUsufruto ? 'not-allowed' : 'pointer', opacity: currentPageUsufruto === totalPagesUsufruto ? 0.5 : 1, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#334155' }}
                     >
                       Próxima <ChevronRight size={16} />
                     </button>
