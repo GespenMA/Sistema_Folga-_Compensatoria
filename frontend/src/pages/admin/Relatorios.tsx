@@ -513,11 +513,11 @@ export const Relatorios: React.FC = () => {
   }, [detalhEstData]);
 
   const kpiUsufruto = useMemo(() => {
-    const totalUsufruidas = usufrutoData.length;
-    const servidoresDistintos = new Set(usufrutoData.map(r => r.employee_id)).size;
-    const unidadesComMovimento = new Set(usufrutoData.map(r => r.establishment_id)).size;
+    const totalUsufruidas = usufrutoFiltered.length;
+    const servidoresDistintos = new Set(usufrutoFiltered.map(r => r.employee_id)).size;
+    const unidadesComMovimento = new Set(usufrutoFiltered.map(r => r.establishment_id)).size;
     return { totalUsufruidas, servidoresDistintos, unidadesComMovimento };
-  }, [usufrutoData]);
+  }, [usufrutoFiltered]);
 
   const activeCycleObj = cycles.find(c => c.id === selectedCycle);
 
