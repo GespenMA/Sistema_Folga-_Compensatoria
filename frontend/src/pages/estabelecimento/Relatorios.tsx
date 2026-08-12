@@ -61,6 +61,8 @@ const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('pt-BR', { tim
 export const Relatorios: React.FC = () => {
   const { profile } = useAuth();
   
+  const [activeTab, setActiveTab] = useState<'FOLHA' | 'USUFRUIDAS'>('FOLHA');
+
   // Filtros
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -647,8 +649,24 @@ export const Relatorios: React.FC = () => {
             </div>
           )}
 
-          {/* TABELA: FOLHA POR SERVIDOR */}
-          <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+          {/* TABS */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-divider)' }}>
+            <button 
+              style={{ background: 'none', border: 'none', padding: '8px 16px', fontSize: '15px', fontWeight: 600, color: activeTab === 'FOLHA' ? 'var(--color-primary)' : 'var(--color-text-muted)', borderBottom: activeTab === 'FOLHA' ? '2px solid var(--color-primary)' : '2px solid transparent', cursor: 'pointer' }}
+              onClick={() => setActiveTab('FOLHA')}
+            >
+              Detalhamento da Folha de Pagamento
+            </button>
+            <button 
+              style={{ background: 'none', border: 'none', padding: '8px 16px', fontSize: '15px', fontWeight: 600, color: activeTab === 'USUFRUIDAS' ? 'var(--color-primary)' : 'var(--color-text-muted)', borderBottom: activeTab === 'USUFRUIDAS' ? '2px solid var(--color-primary)' : '2px solid transparent', cursor: 'pointer' }}
+              onClick={() => setActiveTab('USUFRUIDAS')}
+            >
+              Folgas Usufruídas
+            </button>
+          </div>
+
+          {activeTab === 'FOLHA' && (
+            <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
             
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--color-text-base)' }}>
@@ -753,9 +771,10 @@ export const Relatorios: React.FC = () => {
               )}
             </div>
           </div>
+          )}
 
-          {/* TABELA: FOLGAS USUFRUÍDAS */}
-          <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', marginTop: '24px' }}>
+          {activeTab === 'USUFRUIDAS' && (
+            <div style={{ background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
 
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--color-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'var(--color-text-base)' }}>
@@ -838,6 +857,7 @@ export const Relatorios: React.FC = () => {
               )}
             </div>
           </div>
+          )}
         </>
       )}
 

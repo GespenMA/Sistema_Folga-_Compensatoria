@@ -733,7 +733,7 @@ export const Solicitacoes: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
-            <h3 style={{ margin: 0 }}>Folgas Disponíveis para Compra</h3>
+            <h3 style={{ margin: 0 }}>Folgas Disponíveis para Compra ou Gozo</h3>
             {selectedFolgas.length > 0 && (
               <button 
                 className="btn btn-primary" 

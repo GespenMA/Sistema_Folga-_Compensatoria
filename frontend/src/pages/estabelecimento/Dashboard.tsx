@@ -107,7 +107,7 @@ export const EstabelecimentoDashboard: React.FC = () => {
         // 5. Solicitações de compra do ciclo para esta unidade
         const { data: requests } = await supabase
           .from('purchase_requests')
-          .select('id, valor, status, requested_at, position_id, positions (codigo, nome), employees (nome, matricula)')
+          .select('id, valor, status, requested_at, position_id, tipo_solicitacao, positions (codigo, nome), employees (nome, matricula)')
           .eq('cycle_id', ciclo.id)
           .eq('establishment_id', profile!.establishment_id)
           .order('requested_at', { ascending: false });
@@ -209,8 +209,10 @@ export const EstabelecimentoDashboard: React.FC = () => {
   }
 
   // Direitos
-  const rightsUtilizados = compensatoryDays.filter(d => d.status === 'USUFRUIDA' || d.status === 'INDENIZADA').length;
-  const rightsPendentes = compensatoryDays.filter(d => d.status === 'INDENIZACAO_SOLICITADA').length;
+  const folgasGozadas = compensatoryDays.filter(d => d.status === 'USUFRUIDA').length;
+  const folgasCompradas = reqAprovadas.filter(r => r.tipo_solicitacao === 'FOLGA_COMPENSATORIA').length;
+  const plantaoPlusCompradas = reqAprovadas.filter(r => r.tipo_solicitacao === 'PLANTAO_PLUS').length;
+  const aguardandoDecisao = reqPendentes.length;
 
   const getLimit = (codigo: string) => limits.find(lim => lim.positions?.codigo === codigo)?.quantidade_planejada || 0;
   const getConsumido = (codigo: string) => reqAprovadas.filter(r => r.positions?.codigo === codigo).length + reqPendentes.filter(r => r.positions?.codigo === codigo).length;
@@ -321,16 +323,27 @@ export const EstabelecimentoDashboard: React.FC = () => {
                 </div>
                 Direitos Gerados
               </div>
-              <div className="modern-card-value">{compensatoryDays.length}</div>
+              <div className="modern-card-value" style={{ marginBottom: '4px' }}>{compensatoryDays.length}</div>
+              <div style={{ fontSize: '11px', color: 'var(--color-neutral-500)', marginBottom: '12px', lineHeight: 1.4 }}>
+                 Total de folgas adquiridas pelos servidores da unidade neste ciclo (1 folga de 12h a cada 21 plantões).
+              </div>
               
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '4px' }}>
+                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }}></span>
+                   {folgasCompradas} compradas (folgas)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '4px' }}>
+                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#8b5cf6' }}></span>
+                   {plantaoPlusCompradas} compradas (plantão plus)
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '4px' }}>
                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
-                   {rightsUtilizados} utilizados/comprados
+                   {folgasGozadas} folgas gozadas
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#94a3b8' }}></span>
-                   {rightsPendentes} aguardando decisão
+                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }}></span>
+                   {aguardandoDecisao} aguardando decisão
                 </div>
               </div>
               
