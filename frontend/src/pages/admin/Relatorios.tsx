@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import * as XLSX from 'xlsx';
-import { FileText, Download, FileSpreadsheet, Filter, Building2, Users, DollarSign, TrendingUp, AlertCircle } from 'lucide-react';
+import { FileText, Download, FileSpreadsheet, Filter, Building2, Users, DollarSign, TrendingUp, AlertCircle, CalendarCheck } from 'lucide-react';
 
 // =============================================
 // TIPOS
@@ -57,7 +57,22 @@ type FolhaServidorRow = {
   datas_plantao: string[];
 };
 
-type ActiveTab = 'orcado_gasto' | 'detalhe_est' | 'folha_servidor';
+// Rel 4: Folgas Usufruídas
+type UsufrutoRow = {
+  id: string;
+  establishment_id: string;
+  nome_est: string;
+  employee_id: string;
+  matricula: string;
+  nome_servidor: string;
+  position_codigo: string;
+  nome_cargo: string;
+  ciclo_nome: string;
+  data_usufruto: string;
+  registrado_por: string;
+};
+
+type ActiveTab = 'orcado_gasto' | 'detalhe_est' | 'folha_servidor' | 'folgas_usufruidas';
 
 // =============================================
 // HELPERS
@@ -98,6 +113,7 @@ export const Relatorios: React.FC = () => {
   const [orcadoGastoData, setOrcadoGastoData] = useState<OrcadoGastoRow[]>([]);
   const [detalhEstData, setDetalhEstData] = useState<DetalhEstRow[]>([]);
   const [folhaData, setFolhaData] = useState<FolhaServidorRow[]>([]);
+  const [usufrutoData, setUsufrutoData] = useState<UsufrutoRow[]>([]);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('orcado_gasto');
   const [loading, setLoading] = useState(false);
@@ -106,6 +122,7 @@ export const Relatorios: React.FC = () => {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [currentPageDetalh, setCurrentPageDetalh] = useState(1);
+  const [currentPageUsufruto, setCurrentPageUsufruto] = useState(1);
   const itemsPerPage = 20;
 
   // Custom Dropdown State for Estabelecimento Penal
@@ -172,7 +189,8 @@ export const Relatorios: React.FC = () => {
     try {
       if (tab === 'orcado_gasto') await loadOrcadoGasto();
       else if (tab === 'detalhe_est') await loadDetalhEstabelecimento();
-      else await loadFolhaServidor();
+      else if (tab === 'folha_servidor') await loadFolhaServidor();
+      else await loadUsufruto();
     } catch (e: any) {
       setErrorMsg(e?.message || 'Erro ao carregar dados.');
     } finally {
@@ -390,6 +408,36 @@ export const Relatorios: React.FC = () => {
   };
 
   // -------------------------------------------
+  // TAB 4: Folgas Usufruídas
+  // -------------------------------------------
+  const loadUsufruto = async () => {
+    let q = supabase
+      .from('compensatory_days')
+      .select('id, used_at, establishment_id, cycle_id, employees!inner ( id, matricula, nome, position_id, positions ( codigo, nome ) ), establishments ( nome ), cycles ( nome ), profiles!usage_registered_by ( nome )')
+      .eq('cycle_id', selectedCycle)
+      .eq('status', 'USUFRUIDA');
+    if (selectedEst) q = q.eq('establishment_id', selectedEst);
+    if (selectedCargo) q = q.eq('employees.position_id', selectedCargo);
+    const data = await fetchAll(q);
+
+    const rows: UsufrutoRow[] = (data || []).map((row: any) => ({
+      id: row.id,
+      establishment_id: row.establishment_id,
+      nome_est: row.establishments?.nome || '—',
+      employee_id: row.employees?.id || '',
+      matricula: row.employees?.matricula || '—',
+      nome_servidor: row.employees?.nome || '—',
+      position_codigo: row.employees?.positions?.codigo || '—',
+      nome_cargo: row.employees?.positions?.nome || '—',
+      ciclo_nome: row.cycles?.nome || '—',
+      data_usufruto: row.used_at ? fmtDate(row.used_at) : '—',
+      registrado_por: row.profiles?.nome || '—',
+    }));
+    rows.sort((a, b) => a.nome_est.localeCompare(b.nome_est) || a.nome_servidor.localeCompare(b.nome_servidor));
+    setUsufrutoData(rows);
+  };
+
+  // -------------------------------------------
   // FILTRO LOCAL POR SERVIDOR
   // -------------------------------------------
   const folhaFiltered = useMemo(() => {
@@ -421,6 +469,18 @@ export const Relatorios: React.FC = () => {
 
   const totalPagesDetalh = Math.ceil(detalhEstData.length / itemsPerPage);
 
+  // Pagination Folgas Usufruídas
+  useEffect(() => {
+    setCurrentPageUsufruto(1);
+  }, [usufrutoData]);
+
+  const usufrutoPaginated = useMemo(() => {
+    const startIndex = (currentPageUsufruto - 1) * itemsPerPage;
+    return usufrutoData.slice(startIndex, startIndex + itemsPerPage);
+  }, [usufrutoData, currentPageUsufruto]);
+
+  const totalPagesUsufruto = Math.ceil(usufrutoData.length / itemsPerPage);
+
   // -------------------------------------------
   // KPIs
   // -------------------------------------------
@@ -445,6 +505,13 @@ export const Relatorios: React.FC = () => {
     const totalPlus = detalhEstData.filter(r => r.tipo_solicitacao === 'PLANTAO_PLUS').length;
     return { totalAprovado, totalFolgas, totalPlus };
   }, [detalhEstData]);
+
+  const kpiUsufruto = useMemo(() => {
+    const totalUsufruidas = usufrutoData.length;
+    const servidoresDistintos = new Set(usufrutoData.map(r => r.employee_id)).size;
+    const unidadesComMovimento = new Set(usufrutoData.map(r => r.establishment_id)).size;
+    return { totalUsufruidas, servidoresDistintos, unidadesComMovimento };
+  }, [usufrutoData]);
 
   const activeCycleObj = cycles.find(c => c.id === selectedCycle);
 
@@ -479,7 +546,7 @@ export const Relatorios: React.FC = () => {
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, 'Detalhe por Estabelecimento');
-    } else {
+    } else if (activeTab === 'folha_servidor') {
       const rows = folhaFiltered.map(r => ({
         'Matrícula': r.matricula,
         'Nome do Servidor': r.nome,
@@ -497,9 +564,21 @@ export const Relatorios: React.FC = () => {
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, 'Folha por Servidor');
+    } else {
+      const rows = usufrutoData.map(r => ({
+        'Estabelecimento Penal': r.nome_est,
+        'Servidor': r.nome_servidor,
+        'Matrícula': r.matricula,
+        'Cargo': r.nome_cargo,
+        'Ciclo': r.ciclo_nome,
+        'Data de Usufruto': r.data_usufruto,
+        'Registrado por': r.registrado_por,
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Folgas Usufruídas');
     }
 
-    const tabName = activeTab === 'orcado_gasto' ? 'OrcadoGasto' : activeTab === 'detalhe_est' ? 'DetalhEst' : 'FolhaServidor';
+    const tabName = activeTab === 'orcado_gasto' ? 'OrcadoGasto' : activeTab === 'detalhe_est' ? 'DetalhEst' : activeTab === 'folha_servidor' ? 'FolhaServidor' : 'FolgasUsufruidas';
     XLSX.writeFile(wb, `Relatorio_${tabName}_${cicloNome.replace(/\s/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
@@ -527,7 +606,9 @@ export const Relatorios: React.FC = () => {
         ? 'Relatório 1: Orçado vs. Gasto por Estabelecimento'
         : activeTab === 'detalhe_est'
         ? 'Relatório 2: Detalhamento por Estabelecimento'
-        : 'Relatório 3: Folha de Pagamento por Servidor';
+        : activeTab === 'folha_servidor'
+        ? 'Relatório 3: Folha de Pagamento por Servidor'
+        : 'Relatório 4: Folgas Usufruídas';
       doc.text(tabLabel, 14, 23);
       doc.setFontSize(9);
       doc.setTextColor(100, 116, 139);
@@ -590,7 +671,7 @@ export const Relatorios: React.FC = () => {
             }
           },
         });
-      } else {
+      } else if (activeTab === 'folha_servidor') {
         const totalPagar = folhaFiltered.reduce((s, r) => s + r.total_a_pagar, 0);
         autoTable(doc, {
           startY: 36,
@@ -624,9 +705,35 @@ export const Relatorios: React.FC = () => {
             }
           },
         });
+      } else {
+        autoTable(doc, {
+          startY: 36,
+          head: [['Estabelecimento', 'Servidor', 'Matrícula', 'Cargo', 'Ciclo', 'Data de Usufruto', 'Registrado por']],
+          body: [
+            ...usufrutoData.map(r => [
+              r.nome_est,
+              r.nome_servidor,
+              r.matricula,
+              r.position_codigo,
+              r.ciclo_nome,
+              r.data_usufruto,
+              r.registrado_por,
+            ]),
+            ['TOTAL GERAL', `${usufrutoData.length} registro(s)`, '', '', '', '', ''],
+          ],
+          headStyles: { fillColor: [8, 145, 178], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 8 },
+          alternateRowStyles: { fillColor: [236, 254, 255] },
+          didParseCell: (data) => {
+            if (data.row.index === usufrutoData.length) {
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.fillColor = [165, 243, 252];
+            }
+          },
+        });
       }
 
-      const tabName = activeTab === 'orcado_gasto' ? 'OrcadoGasto' : activeTab === 'detalhe_est' ? 'DetalhEst' : 'FolhaServidor';
+      const tabName = activeTab === 'orcado_gasto' ? 'OrcadoGasto' : activeTab === 'detalhe_est' ? 'DetalhEst' : activeTab === 'folha_servidor' ? 'FolhaServidor' : 'FolgasUsufruidas';
       doc.save(`Relatorio_${tabName}_${cicloNome.replace(/\s/g, '_')}_${new Date().toISOString().slice(0,10)}.pdf`);
     } catch (e: any) {
       setErrorMsg('Erro ao gerar PDF: ' + (e?.message || String(e)));
@@ -641,12 +748,14 @@ export const Relatorios: React.FC = () => {
   const currentEmpty =
     (activeTab === 'orcado_gasto' && orcadoGastoData.length === 0) ||
     (activeTab === 'detalhe_est' && detalhEstData.length === 0) ||
-    (activeTab === 'folha_servidor' && folhaFiltered.length === 0);
+    (activeTab === 'folha_servidor' && folhaFiltered.length === 0) ||
+    (activeTab === 'folgas_usufruidas' && usufrutoData.length === 0);
 
   const tabConfig: { key: ActiveTab; label: string; icon: React.ReactNode }[] = [
     { key: 'orcado_gasto', label: 'Orçado vs. Gasto', icon: <TrendingUp size={15} /> },
     { key: 'detalhe_est', label: 'Detalhamento por Unidade', icon: <Building2 size={15} /> },
     { key: 'folha_servidor', label: 'Folha por Servidor', icon: <Users size={15} /> },
+    { key: 'folgas_usufruidas', label: 'Folgas Usufruídas', icon: <CalendarCheck size={15} /> },
   ];
 
   // -------------------------------------------
@@ -824,6 +933,11 @@ export const Relatorios: React.FC = () => {
             <KpiCard label="Plantão Plus" value={kpiFolha.totalPlus.toString()} color="#8b5cf6" icon={<TrendingUp size={18} />} />
             <KpiCard label="TOTAL A PAGAR" value={fmt(kpiFolha.totalPagar)} color="#059669" icon={<DollarSign size={18} />} highlight />
           </>)}
+          {activeTab === 'folgas_usufruidas' && (<>
+            <KpiCard label="Folgas Usufruídas" value={kpiUsufruto.totalUsufruidas.toString()} color="#0891b2" icon={<CalendarCheck size={18} />} />
+            <KpiCard label="Servidores Distintos" value={kpiUsufruto.servidoresDistintos.toString()} color="#3b82f6" icon={<Users size={18} />} />
+            <KpiCard label="Unidades com Movimento" value={kpiUsufruto.unidadesComMovimento.toString()} color="#8b5cf6" icon={<Building2 size={18} />} />
+          </>)}
         </div>
       )}
 
@@ -835,6 +949,7 @@ export const Relatorios: React.FC = () => {
             {activeTab === 'orcado_gasto' && `${orcadoGastoData.length} unidade(s) encontrada(s)`}
             {activeTab === 'detalhe_est' && `${detalhEstData.length} linha(s) de detalhamento`}
             {activeTab === 'folha_servidor' && `${folhaFiltered.length} servidor(es) na folha`}
+            {activeTab === 'folgas_usufruidas' && `${usufrutoData.length} folga(s) usufruída(s)`}
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
@@ -1030,6 +1145,57 @@ export const Relatorios: React.FC = () => {
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
                       style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPage === totalPages ? '#f1f5f9' : '#fff', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: currentPage === totalPages ? '#94a3b8' : '#334155' }}
+                    >Próxima</button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* TAB 4: Folgas Usufruídas */}
+            {activeTab === 'folgas_usufruidas' && (
+              <>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: '#0891b2' }}>
+                      {['Estabelecimento', 'Servidor', 'Matrícula', 'Cargo', 'Ciclo', 'Data de Usufruto', 'Registrado por'].map(h => (
+                        <th key={h} style={{ padding: '10px 16px', color: '#fff', fontWeight: 600, fontSize: '11px', textTransform: 'uppercase', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usufrutoPaginated.map((r, i) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#ecfeff' }}>
+                        <td style={{ padding: '10px 16px', fontWeight: 600 }}>{r.nome_est}</td>
+                        <td style={{ padding: '10px 16px' }}>{r.nome_servidor}</td>
+                        <td style={{ padding: '10px 16px', color: '#475569' }}>{r.matricula}</td>
+                        <td style={{ padding: '10px 16px' }}><span style={{ padding: '2px 8px', borderRadius: '4px', background: '#dbeafe', color: '#1e40af', fontWeight: 700, fontSize: '11px' }}>{r.position_codigo}</span></td>
+                        <td style={{ padding: '10px 16px' }}>{r.ciclo_nome}</td>
+                        <td style={{ padding: '10px 16px', whiteSpace: 'nowrap', fontWeight: 600, color: '#0e7490' }}>{r.data_usufruto}</td>
+                        <td style={{ padding: '10px 16px', color: '#475569' }}>{r.registrado_por}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: '#0891b2', color: '#fff' }}>
+                      <td colSpan={7} style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL GERAL — {usufrutoData.length} folga(s) usufruída(s)</td>
+                    </tr>
+                  </tfoot>
+                </table>
+
+                {totalPagesUsufruto > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', padding: '16px', background: '#fff' }}>
+                    <button
+                      onClick={() => setCurrentPageUsufruto(p => Math.max(1, p - 1))}
+                      disabled={currentPageUsufruto === 1}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPageUsufruto === 1 ? '#f1f5f9' : '#fff', cursor: currentPageUsufruto === 1 ? 'not-allowed' : 'pointer', color: currentPageUsufruto === 1 ? '#94a3b8' : '#334155' }}
+                    >Anterior</button>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#475569' }}>
+                      Página {currentPageUsufruto} de {totalPagesUsufruto}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPageUsufruto(p => Math.min(totalPagesUsufruto, p + 1))}
+                      disabled={currentPageUsufruto === totalPagesUsufruto}
+                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: currentPageUsufruto === totalPagesUsufruto ? '#f1f5f9' : '#fff', cursor: currentPageUsufruto === totalPagesUsufruto ? 'not-allowed' : 'pointer', color: currentPageUsufruto === totalPagesUsufruto ? '#94a3b8' : '#334155' }}
                     >Próxima</button>
                   </div>
                 )}
