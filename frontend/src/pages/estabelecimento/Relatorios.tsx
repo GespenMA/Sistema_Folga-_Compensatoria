@@ -2,13 +2,17 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
-import { FileText, FileSpreadsheet, Filter, Users, DollarSign, Building2, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, CalendarCheck } from 'lucide-react';
+import { FileText, FileSpreadsheet, Filter, Users, DollarSign, Building2, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, CalendarCheck, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // =============================================
 // TIPOS
 // =============================================
+type SortColumnFolha = 'nome' | 'datas_plantao' | 'plantoes_trabalhados' | 'folgas_geradas' | 'folgas_compradas_qtd' | 'valor_folga_comp' | 'plantao_plus_qtd' | 'valor_plantao_plus' | 'total_a_pagar';
+type SortColumnUsufruto = 'nome_servidor' | 'matricula' | 'cargo_nome' | 'ciclo_nome' | 'data_usufruto' | 'registrado_por';
+type SortDirection = 'asc' | 'desc';
+
 type Cycle = { id: string; nome: string; mes: number; ano: number; status: string; data_inicio: string; data_fim: string };
 type Position = { id: string; nome: string; codigo: string };
 
@@ -79,6 +83,12 @@ export const Relatorios: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [currentPageUsufruto, setCurrentPageUsufruto] = useState(1);
   const itemsPerPage = 10;
+
+  const [sortColumnFolha, setSortColumnFolha] = useState<SortColumnFolha | null>(null);
+  const [sortDirectionFolha, setSortDirectionFolha] = useState<SortDirection>('asc');
+  
+  const [sortColumnUsufruto, setSortColumnUsufruto] = useState<SortColumnUsufruto | null>(null);
+  const [sortDirectionUsufruto, setSortDirectionUsufruto] = useState<SortDirection>('asc');
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -348,11 +358,30 @@ export const Relatorios: React.FC = () => {
   }, [searchServidor, selectedCargo, selectedCycle]);
 
   // Dados paginados
-  const totalPages = Math.ceil(filteredFolha.length / itemsPerPage);
+  const sortedFolha = useMemo(() => {
+    if (!sortColumnFolha) return filteredFolha;
+    const sorted = [...filteredFolha].sort((a, b) => {
+      let valA: any = a[sortColumnFolha];
+      let valB: any = b[sortColumnFolha];
+      
+      if (sortColumnFolha === 'datas_plantao') {
+        valA = a.datas_plantao.length > 0 ? a.datas_plantao[0] : '';
+        valB = b.datas_plantao.length > 0 ? b.datas_plantao[0] : '';
+      }
+      
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return valA.localeCompare(valB, 'pt-BR');
+      }
+      return (valA as number) - (valB as number);
+    });
+    return sortDirectionFolha === 'asc' ? sorted : sorted.reverse();
+  }, [filteredFolha, sortColumnFolha, sortDirectionFolha]);
+
+  const totalPages = Math.ceil(sortedFolha.length / itemsPerPage);
   const paginatedFolha = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredFolha.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredFolha, currentPage]);
+    return sortedFolha.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedFolha, currentPage]);
 
   // Totais Folha
   const totFolha = useMemo(() => {
@@ -364,11 +393,76 @@ export const Relatorios: React.FC = () => {
     }, { valor_folga_comp: 0, valor_plantao_plus: 0, total_a_pagar: 0 });
   }, [filteredFolha]);
 
-  const totalPagesUsufruto = Math.ceil(filteredUsufruto.length / itemsPerPage);
+  const sortedUsufruto = useMemo(() => {
+    if (!sortColumnUsufruto) return filteredUsufruto;
+    const sorted = [...filteredUsufruto].sort((a, b) => {
+      let valA: any = a[sortColumnUsufruto];
+      let valB: any = b[sortColumnUsufruto];
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return valA.localeCompare(valB, 'pt-BR');
+      }
+      return 0;
+    });
+    return sortDirectionUsufruto === 'asc' ? sorted : sorted.reverse();
+  }, [filteredUsufruto, sortColumnUsufruto, sortDirectionUsufruto]);
+
+  const totalPagesUsufruto = Math.ceil(sortedUsufruto.length / itemsPerPage);
   const paginatedUsufruto = useMemo(() => {
     const startIndex = (currentPageUsufruto - 1) * itemsPerPage;
-    return filteredUsufruto.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredUsufruto, currentPageUsufruto]);
+    return sortedUsufruto.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedUsufruto, currentPageUsufruto]);
+
+  const handleSortFolha = (column: SortColumnFolha) => {
+    if (sortColumnFolha === column) {
+      setSortDirectionFolha(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumnFolha(column);
+      setSortDirectionFolha('asc');
+    }
+  };
+
+  const renderSortableHeaderFolha = (column: SortColumnFolha, label: string, align: 'left' | 'right' | 'center' = 'left') => {
+    const isActive = sortColumnFolha === column;
+    const Icon = isActive ? (sortDirectionFolha === 'asc' ? ChevronUp : ChevronDown) : ChevronsUpDown;
+    return (
+      <th
+        style={{ padding: '12px 16px', textAlign: align, cursor: 'pointer', userSelect: 'none', fontWeight: column === 'total_a_pagar' ? 700 : 600 }}
+        onClick={() => handleSortFolha(column)}
+        aria-sort={isActive ? (sortDirectionFolha === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+          {label}
+          <Icon size={14} aria-hidden="true" style={{ opacity: isActive ? 1 : 0.35, flexShrink: 0 }} />
+        </span>
+      </th>
+    );
+  };
+
+  const handleSortUsufruto = (column: SortColumnUsufruto) => {
+    if (sortColumnUsufruto === column) {
+      setSortDirectionUsufruto(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumnUsufruto(column);
+      setSortDirectionUsufruto('asc');
+    }
+  };
+
+  const renderSortableHeaderUsufruto = (column: SortColumnUsufruto, label: string, align: 'left' | 'right' | 'center' = 'left') => {
+    const isActive = sortColumnUsufruto === column;
+    const Icon = isActive ? (sortDirectionUsufruto === 'asc' ? ChevronUp : ChevronDown) : ChevronsUpDown;
+    return (
+      <th
+        style={{ padding: '12px 16px', textAlign: align, cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}
+        onClick={() => handleSortUsufruto(column)}
+        aria-sort={isActive ? (sortDirectionUsufruto === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+          {label}
+          <Icon size={14} aria-hidden="true" style={{ opacity: isActive ? 1 : 0.35, flexShrink: 0 }} />
+        </span>
+      </th>
+    );
+  };
 
   const exportUsufrutoExcel = () => {
     const data = filteredUsufruto.map(r => ({
@@ -694,15 +788,15 @@ export const Relatorios: React.FC = () => {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Servidor</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Data(s) do Plantão</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>Pl. Trab.</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'center' }}>Folga Ger.</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Qtd. FC</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>R$ FC</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Qtd. Pl+</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>R$ Pl+</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 700, textAlign: 'right' }}>Total (R$)</th>
+                    {renderSortableHeaderFolha('nome', 'Servidor', 'left')}
+                    {renderSortableHeaderFolha('datas_plantao', 'Data(s) do Plantão', 'left')}
+                    {renderSortableHeaderFolha('plantoes_trabalhados', 'Pl. Trab.', 'center')}
+                    {renderSortableHeaderFolha('folgas_geradas', 'Folga Ger.', 'center')}
+                    {renderSortableHeaderFolha('folgas_compradas_qtd', 'Qtd. FC', 'right')}
+                    {renderSortableHeaderFolha('valor_folga_comp', 'R$ FC', 'right')}
+                    {renderSortableHeaderFolha('plantao_plus_qtd', 'Qtd. Pl+', 'right')}
+                    {renderSortableHeaderFolha('valor_plantao_plus', 'R$ Pl+', 'right')}
+                    {renderSortableHeaderFolha('total_a_pagar', 'Total (R$)', 'right')}
                   </tr>
                 </thead>
                 <tbody>
@@ -802,12 +896,12 @@ export const Relatorios: React.FC = () => {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #e2e8f0', color: '#475569', textAlign: 'left' }}>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Servidor</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Matrícula</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Cargo</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Ciclo</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Data de Usufruto</th>
-                    <th style={{ padding: '12px 16px', fontWeight: 600 }}>Registrado por</th>
+                    {renderSortableHeaderUsufruto('nome_servidor', 'Servidor', 'left')}
+                    {renderSortableHeaderUsufruto('matricula', 'Matrícula', 'left')}
+                    {renderSortableHeaderUsufruto('cargo_nome', 'Cargo', 'left')}
+                    {renderSortableHeaderUsufruto('ciclo_nome', 'Ciclo', 'left')}
+                    {renderSortableHeaderUsufruto('data_usufruto', 'Data de Usufruto', 'left')}
+                    {renderSortableHeaderUsufruto('registrado_por', 'Registrado por', 'left')}
                   </tr>
                 </thead>
                 <tbody>

@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+
+type SortColumnSol = 'servidor' | 'tipo' | 'data_plantao' | 'valor' | 'status';
+type SortColumnUsufruida = 'servidor' | 'data_usufruto';
+type SortDirection = 'asc' | 'desc';
 
 type FolgaDisponivel = {
   id: string;
@@ -88,6 +93,12 @@ export const Solicitacoes: React.FC = () => {
   const [currentPageFolgas, setCurrentPageFolgas] = useState(1);
   const [currentPageSolicitacoes, setCurrentPageSolicitacoes] = useState(1);
   const ITEMS_PER_PAGE = 24;
+
+  const [sortColumnSol, setSortColumnSol] = useState<SortColumnSol | null>(null);
+  const [sortDirectionSol, setSortDirectionSol] = useState<SortDirection>('asc');
+  
+  const [sortColumnUsufruida, setSortColumnUsufruida] = useState<SortColumnUsufruida | null>(null);
+  const [sortDirectionUsufruida, setSortDirectionUsufruida] = useState<SortDirection>('asc');
 
   useEffect(() => {
     setCurrentPageFolgas(1);
@@ -688,6 +699,101 @@ export const Solicitacoes: React.FC = () => {
       default: return <span className="tag">{status}</span>;
     }
   };
+  const sortedSolicitacoes = React.useMemo(() => {
+    if (!sortColumnSol) return solicitacoes;
+    const sorted = [...solicitacoes].sort((a, b) => {
+      if (sortColumnSol === 'servidor') {
+        return (a.employees?.nome || '').localeCompare(b.employees?.nome || '', 'pt-BR');
+      }
+      if (sortColumnSol === 'tipo') {
+        const valA = a.tipo_solicitacao === 'PLANTAO_PLUS' ? 'Plantão Plus' : 'Folga';
+        const valB = b.tipo_solicitacao === 'PLANTAO_PLUS' ? 'Plantão Plus' : 'Folga';
+        return valA.localeCompare(valB, 'pt-BR');
+      }
+      if (sortColumnSol === 'data_plantao') {
+        return (a.data_plantao || '').localeCompare(b.data_plantao || '');
+      }
+      if (sortColumnSol === 'valor') {
+        return (a.valor || 0) - (b.valor || 0);
+      }
+      if (sortColumnSol === 'status') {
+        return (a.status || '').localeCompare(b.status || '', 'pt-BR');
+      }
+      return 0;
+    });
+    return sortDirectionSol === 'asc' ? sorted : sorted.reverse();
+  }, [solicitacoes, sortColumnSol, sortDirectionSol]);
+
+  const sortedFolgasUsufruidas = React.useMemo(() => {
+    if (!sortColumnUsufruida) return folgasUsufruidas;
+    const sorted = [...folgasUsufruidas].sort((a, b) => {
+      if (sortColumnUsufruida === 'servidor') {
+        return (a.employees?.nome || '').localeCompare(b.employees?.nome || '', 'pt-BR');
+      }
+      if (sortColumnUsufruida === 'data_usufruto') {
+        return (a.used_at || '').localeCompare(b.used_at || '');
+      }
+      return 0;
+    });
+    return sortDirectionUsufruida === 'asc' ? sorted : sorted.reverse();
+  }, [folgasUsufruidas, sortColumnUsufruida, sortDirectionUsufruida]);
+
+  const totalPagesSolicitacoes = Math.ceil(sortedSolicitacoes.length / ITEMS_PER_PAGE);
+  const paginatedSolicitacoes = React.useMemo(() => {
+    return sortedSolicitacoes.slice((currentPageSolicitacoes - 1) * ITEMS_PER_PAGE, currentPageSolicitacoes * ITEMS_PER_PAGE);
+  }, [sortedSolicitacoes, currentPageSolicitacoes]);
+
+  const handleSortSol = (column: SortColumnSol) => {
+    if (sortColumnSol === column) {
+      setSortDirectionSol(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumnSol(column);
+      setSortDirectionSol('asc');
+    }
+  };
+
+  const renderSortableHeaderSol = (column: SortColumnSol, label: string, align: 'left' | 'right' | 'center' = 'left') => {
+    const isActive = sortColumnSol === column;
+    const Icon = isActive ? (sortDirectionSol === 'asc' ? ChevronUp : ChevronDown) : ChevronsUpDown;
+    return (
+      <th
+        style={{ padding: 'var(--space-3)', textAlign: align, cursor: 'pointer', userSelect: 'none' }}
+        onClick={() => handleSortSol(column)}
+        aria-sort={isActive ? (sortDirectionSol === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+          {label}
+          <Icon size={14} aria-hidden="true" style={{ opacity: isActive ? 1 : 0.35, flexShrink: 0 }} />
+        </span>
+      </th>
+    );
+  };
+
+  const handleSortUsufruida = (column: SortColumnUsufruida) => {
+    if (sortColumnUsufruida === column) {
+      setSortDirectionUsufruida(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumnUsufruida(column);
+      setSortDirectionUsufruida('asc');
+    }
+  };
+
+  const renderSortableHeaderUsufruida = (column: SortColumnUsufruida, label: string, align: 'left' | 'right' | 'center' = 'left') => {
+    const isActive = sortColumnUsufruida === column;
+    const Icon = isActive ? (sortDirectionUsufruida === 'asc' ? ChevronUp : ChevronDown) : ChevronsUpDown;
+    return (
+      <th
+        style={{ padding: 'var(--space-3)', textAlign: align, cursor: 'pointer', userSelect: 'none' }}
+        onClick={() => handleSortUsufruida(column)}
+        aria-sort={isActive ? (sortDirectionUsufruida === 'asc' ? 'ascending' : 'descending') : 'none'}
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start' }}>
+          {label}
+          <Icon size={14} aria-hidden="true" style={{ opacity: isActive ? 1 : 0.35, flexShrink: 0 }} />
+        </span>
+      </th>
+    );
+  };
 
   if (loading) return <div>Carregando...</div>;
 
@@ -878,11 +984,6 @@ export const Solicitacoes: React.FC = () => {
 
         </div>
 
-        {(() => {
-          const totalPagesSolicitacoes = Math.ceil(solicitacoes.length / ITEMS_PER_PAGE);
-          const paginatedSolicitacoes = solicitacoes.slice((currentPageSolicitacoes - 1) * ITEMS_PER_PAGE, currentPageSolicitacoes * ITEMS_PER_PAGE);
-
-          return (
             <div style={{ flex: '2 1 500px', minWidth: 0 }}>
           <div style={{ display: 'flex', gap: '16px', marginBottom: 'var(--space-4)', borderBottom: '1px solid var(--color-divider)' }}>
             <button 
@@ -941,11 +1042,11 @@ export const Solicitacoes: React.FC = () => {
                       }}
                     />
                   </th>
-                  <th style={{ padding: 'var(--space-3)' }}>Servidor</th>
-                  <th style={{ padding: 'var(--space-3)' }}>Tipo / Qtd.</th>
-                  <th style={{ padding: 'var(--space-3)' }}>Data do Plantão</th>
-                  <th style={{ padding: 'var(--space-3)' }}>Valor Solicitado</th>
-                  <th style={{ padding: 'var(--space-3)' }}>Status</th>
+                  {renderSortableHeaderSol('servidor', 'Servidor', 'left')}
+                  {renderSortableHeaderSol('tipo', 'Tipo / Qtd.', 'left')}
+                  {renderSortableHeaderSol('data_plantao', 'Data do Plantão', 'left')}
+                  {renderSortableHeaderSol('valor', 'Valor Solicitado', 'left')}
+                  {renderSortableHeaderSol('status', 'Status', 'left')}
                   <th style={{ padding: 'var(--space-3)', textAlign: 'right' }}>Ações</th>
                 </tr>
               </thead>
@@ -1035,52 +1136,63 @@ export const Solicitacoes: React.FC = () => {
           )}
 
           {activeRightTab === 'USUFRUIDAS' && (
-            <div className="blueprint card elev-sm" style={{ padding: 'var(--space-4)', background: 'var(--color-surface)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {folgasUsufruidas.length === 0 ? (
-                  <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '13px' }}>
-                    Nenhuma folga usufruída registrada neste ciclo.
-                  </div>
-                ) : folgasUsufruidas.map(f => (
-                  <div key={f.id} style={{ padding: 'var(--space-3)', border: '1px solid var(--color-divider)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-                    <div>
-                      <strong>{f.employees?.nome} ({f.employees?.matricula})</strong>
-                      <div style={{ color: 'var(--color-text-muted)', marginTop: '2px' }}>{f.employees?.positions?.nome}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontWeight: 600, fontSize: '11px' }}>
-                        Usufruída
-                      </span>
-                      <div style={{ color: 'var(--color-text-muted)', marginTop: '4px', fontSize: '12px' }}>
-                        Em: {f.used_at ? new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR') : '--'}
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '6px', justifyContent: 'flex-end' }}>
-                        <button
-                          type="button"
-                          className="btn"
-                          style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}
-                          onClick={() => openUsufrutoModal(f)}
-                        >
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          className="btn"
-                          style={{ padding: '4px 10px', fontSize: '11px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}
-                          onClick={() => handleDesfazerUsufruto(f)}
-                        >
-                          Excluir
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="blueprint card elev-sm" style={{ padding: 0, background: 'var(--color-surface)', overflowX: 'auto' }}>
+              <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                    {renderSortableHeaderUsufruida('servidor', 'Servidor', 'left')}
+                    {renderSortableHeaderUsufruida('data_usufruto', 'Data de Usufruto', 'left')}
+                    <th style={{ padding: 'var(--space-3)', textAlign: 'right' }}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedFolgasUsufruidas.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        Nenhuma folga usufruída registrada neste ciclo.
+                      </td>
+                    </tr>
+                  ) : sortedFolgasUsufruidas.map(f => (
+                    <tr key={f.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                      <td style={{ padding: 'var(--space-3)' }}>
+                        <div style={{ fontWeight: 500 }}>{f.employees?.nome} ({f.employees?.matricula})</div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{f.employees?.positions?.nome}</div>
+                      </td>
+                      <td style={{ padding: 'var(--space-3)' }}>
+                        <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontWeight: 600, fontSize: '11px', display: 'inline-block', marginBottom: '4px' }}>
+                          Usufruída
+                        </span>
+                        <div style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
+                          Em: {f.used_at ? new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR') : '--'}
+                        </div>
+                      </td>
+                      <td style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}
+                            onClick={() => openUsufrutoModal(f)}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="btn"
+                            style={{ padding: '4px 10px', fontSize: '11px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}
+                            onClick={() => handleDesfazerUsufruto(f)}
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      );
-      })()}
       </div>
 
       {/* Modal de Compra */}
