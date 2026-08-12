@@ -334,22 +334,22 @@ export const Solicitacoes: React.FC = () => {
 
   const openUsufrutoModal = (folga: any) => {
     setSelectedFolga(folga);
-    setDataUsufruto('');
+    setDataUsufruto(folga.used_at || '');
     setIsUsufrutoModalOpen(true);
   };
 
   const handleRegistrarUsufruto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFolga || !dataUsufruto) return;
-    
+
     setIsSubmitting(true);
     try {
       const { error } = await supabase
         .from('compensatory_days')
-        .update({ 
-          status: 'USUFRUIDA', 
-          used_at: dataUsufruto, 
-          usage_registered_by: profile?.id 
+        .update({
+          status: 'USUFRUIDA',
+          used_at: dataUsufruto,
+          usage_registered_by: profile?.id
         })
         .eq('id', selectedFolga.id);
 
@@ -359,6 +359,30 @@ export const Solicitacoes: React.FC = () => {
       fetchData(false);
     } catch (err: any) {
       alert(err.message || "Erro ao registrar usufruto.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDesfazerUsufruto = async (folga: any) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o registro de gozo de ${folga.employees?.nome}? A folga voltará para "Folgas Disponíveis para Compra" — o plantão que a gerou não é perdido.`)) return;
+
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('compensatory_days')
+        .update({
+          status: 'GERADA',
+          used_at: null,
+          usage_registered_by: null
+        })
+        .eq('id', folga.id);
+
+      if (error) throw error;
+
+      fetchData(false);
+    } catch (err: any) {
+      alert(err.message || "Erro ao excluir o registro de gozo.");
     } finally {
       setIsSubmitting(false);
     }
@@ -1020,6 +1044,24 @@ export const Solicitacoes: React.FC = () => {
                       <div style={{ color: 'var(--color-text-muted)', marginTop: '4px', fontSize: '12px' }}>
                         Em: {f.used_at ? new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR') : '--'}
                       </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '6px', justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}
+                          onClick={() => openUsufrutoModal(f)}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ padding: '4px 10px', fontSize: '11px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}
+                          onClick={() => handleDesfazerUsufruto(f)}
+                        >
+                          Excluir
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1143,7 +1185,7 @@ export const Solicitacoes: React.FC = () => {
           background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
           <div className="blueprint card elev-md" style={{ width: '400px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>Registrar Gozo</h3>
+            <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>{selectedFolga.status === 'USUFRUIDA' ? 'Editar Gozo' : 'Registrar Gozo'}</h3>
             
             <div style={{ background: 'var(--color-bg)', padding: 'var(--space-3)', borderRadius: '4px', marginBottom: 'var(--space-4)' }}>
               <div><strong>Servidor:</strong> {selectedFolga.employees?.nome}</div>
@@ -1172,7 +1214,7 @@ export const Solicitacoes: React.FC = () => {
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-2)' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setIsUsufrutoModalOpen(false)} disabled={isSubmitting}>Cancelar</button>
                 <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-                  {isSubmitting ? 'Registrando...' : 'Confirmar Gozo'}
+                  {isSubmitting ? 'Salvando...' : (selectedFolga.status === 'USUFRUIDA' ? 'Salvar Alteração' : 'Confirmar Gozo')}
                 </button>
               </div>
             </form>
