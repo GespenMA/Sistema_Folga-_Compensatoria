@@ -42,6 +42,7 @@ type UsufrutoRow = {
   employee_id: string;
   matricula: string;
   nome_servidor: string;
+  position_id: string;
   cargo_nome: string;
   ciclo_nome: string;
   data_usufruto: string;
@@ -283,13 +284,12 @@ export const Relatorios: React.FC = () => {
   const loadUsufruto = async () => {
     const estId = profile!.establishment_id!;
 
-    let q = supabase
+    const q = supabase
       .from('compensatory_days')
       .select('id, used_at, cycle_id, employees!inner ( id, matricula, nome, position_id, positions ( nome ) ), cycles ( nome ), profiles!usage_registered_by ( nome )')
       .eq('cycle_id', selectedCycle)
       .eq('establishment_id', estId)
       .eq('status', 'USUFRUIDA');
-    if (selectedCargo) q = q.eq('employees.position_id', selectedCargo);
 
     const { data, error } = await q;
     if (error) throw error;
@@ -299,6 +299,7 @@ export const Relatorios: React.FC = () => {
       employee_id: row.employees?.id || '',
       matricula: row.employees?.matricula || '—',
       nome_servidor: row.employees?.nome || '—',
+      position_id: row.employees?.position_id || '',
       cargo_nome: row.employees?.positions?.nome || '—',
       ciclo_nome: row.cycles?.nome || '—',
       data_usufruto: row.used_at ? fmtDate(row.used_at) : '—',
@@ -332,8 +333,11 @@ export const Relatorios: React.FC = () => {
       const lower = searchServidor.toLowerCase();
       f = f.filter(r => r.nome_servidor.toLowerCase().includes(lower) || r.matricula.toLowerCase().includes(lower));
     }
+    if (selectedCargo) {
+      f = f.filter(r => r.position_id === selectedCargo);
+    }
     return f;
-  }, [usufrutoData, searchServidor]);
+  }, [usufrutoData, searchServidor, selectedCargo]);
 
   // Resetar página ao filtrar
   useEffect(() => {

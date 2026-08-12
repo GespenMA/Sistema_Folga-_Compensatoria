@@ -446,6 +446,12 @@ export const Relatorios: React.FC = () => {
     return folhaData.filter(r => r.nome.toLowerCase().includes(q) || r.matricula.toLowerCase().includes(q));
   }, [folhaData, searchServidor]);
 
+  const usufrutoFiltered = useMemo(() => {
+    if (!searchServidor.trim()) return usufrutoData;
+    const q = searchServidor.toLowerCase();
+    return usufrutoData.filter(r => r.nome_servidor.toLowerCase().includes(q) || r.matricula.toLowerCase().includes(q));
+  }, [usufrutoData, searchServidor]);
+
   useEffect(() => {
     setCurrentPage(1);
   }, [folhaFiltered]);
@@ -472,14 +478,14 @@ export const Relatorios: React.FC = () => {
   // Pagination Folgas Usufruídas
   useEffect(() => {
     setCurrentPageUsufruto(1);
-  }, [usufrutoData]);
+  }, [usufrutoFiltered]);
 
   const usufrutoPaginated = useMemo(() => {
     const startIndex = (currentPageUsufruto - 1) * itemsPerPage;
-    return usufrutoData.slice(startIndex, startIndex + itemsPerPage);
-  }, [usufrutoData, currentPageUsufruto]);
+    return usufrutoFiltered.slice(startIndex, startIndex + itemsPerPage);
+  }, [usufrutoFiltered, currentPageUsufruto]);
 
-  const totalPagesUsufruto = Math.ceil(usufrutoData.length / itemsPerPage);
+  const totalPagesUsufruto = Math.ceil(usufrutoFiltered.length / itemsPerPage);
 
   // -------------------------------------------
   // KPIs
@@ -565,7 +571,7 @@ export const Relatorios: React.FC = () => {
       const ws = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, 'Folha por Servidor');
     } else {
-      const rows = usufrutoData.map(r => ({
+      const rows = usufrutoFiltered.map(r => ({
         'Estabelecimento Penal': r.nome_est,
         'Servidor': r.nome_servidor,
         'Matrícula': r.matricula,
@@ -710,7 +716,7 @@ export const Relatorios: React.FC = () => {
           startY: 36,
           head: [['Estabelecimento', 'Servidor', 'Matrícula', 'Cargo', 'Ciclo', 'Data de Usufruto', 'Registrado por']],
           body: [
-            ...usufrutoData.map(r => [
+            ...usufrutoFiltered.map(r => [
               r.nome_est,
               r.nome_servidor,
               r.matricula,
@@ -719,13 +725,13 @@ export const Relatorios: React.FC = () => {
               r.data_usufruto,
               r.registrado_por,
             ]),
-            ['TOTAL GERAL', `${usufrutoData.length} registro(s)`, '', '', '', '', ''],
+            ['TOTAL GERAL', `${usufrutoFiltered.length} registro(s)`, '', '', '', '', ''],
           ],
           headStyles: { fillColor: [8, 145, 178], textColor: 255, fontSize: 8, fontStyle: 'bold' },
           bodyStyles: { fontSize: 8 },
           alternateRowStyles: { fillColor: [236, 254, 255] },
           didParseCell: (data) => {
-            if (data.row.index === usufrutoData.length) {
+            if (data.row.index === usufrutoFiltered.length) {
               data.cell.styles.fontStyle = 'bold';
               data.cell.styles.fillColor = [165, 243, 252];
             }
@@ -749,7 +755,7 @@ export const Relatorios: React.FC = () => {
     (activeTab === 'orcado_gasto' && orcadoGastoData.length === 0) ||
     (activeTab === 'detalhe_est' && detalhEstData.length === 0) ||
     (activeTab === 'folha_servidor' && folhaFiltered.length === 0) ||
-    (activeTab === 'folgas_usufruidas' && usufrutoData.length === 0);
+    (activeTab === 'folgas_usufruidas' && usufrutoFiltered.length === 0);
 
   const tabConfig: { key: ActiveTab; label: string; icon: React.ReactNode }[] = [
     { key: 'orcado_gasto', label: 'Orçado vs. Gasto', icon: <TrendingUp size={15} /> },
@@ -867,7 +873,7 @@ export const Relatorios: React.FC = () => {
           </select>
         </div>
 
-        {activeTab === 'folha_servidor' && (
+        {(activeTab === 'folha_servidor' || activeTab === 'folgas_usufruidas') && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '200px', flex: '1' }}>
             <label style={{ fontSize: '11px', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Buscar Servidor</label>
             <input
@@ -949,7 +955,7 @@ export const Relatorios: React.FC = () => {
             {activeTab === 'orcado_gasto' && `${orcadoGastoData.length} unidade(s) encontrada(s)`}
             {activeTab === 'detalhe_est' && `${detalhEstData.length} linha(s) de detalhamento`}
             {activeTab === 'folha_servidor' && `${folhaFiltered.length} servidor(es) na folha`}
-            {activeTab === 'folgas_usufruidas' && `${usufrutoData.length} folga(s) usufruída(s)`}
+            {activeTab === 'folgas_usufruidas' && `${usufrutoFiltered.length} folga(s) usufruída(s)`}
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             <button
@@ -1177,7 +1183,7 @@ export const Relatorios: React.FC = () => {
                   </tbody>
                   <tfoot>
                     <tr style={{ background: '#0891b2', color: '#fff' }}>
-                      <td colSpan={7} style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL GERAL — {usufrutoData.length} folga(s) usufruída(s)</td>
+                      <td colSpan={7} style={{ padding: '10px 16px', fontWeight: 700 }}>TOTAL GERAL — {usufrutoFiltered.length} folga(s) usufruída(s)</td>
                     </tr>
                   </tfoot>
                 </table>
