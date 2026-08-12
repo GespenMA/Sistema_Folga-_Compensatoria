@@ -326,9 +326,19 @@ export const Relatorios: React.FC = () => {
     return f;
   }, [folhaData, searchServidor, selectedCargo, positions]);
 
+  const filteredUsufruto = useMemo(() => {
+    let f = usufrutoData;
+    if (searchServidor) {
+      const lower = searchServidor.toLowerCase();
+      f = f.filter(r => r.nome_servidor.toLowerCase().includes(lower) || r.matricula.toLowerCase().includes(lower));
+    }
+    return f;
+  }, [usufrutoData, searchServidor]);
+
   // Resetar página ao filtrar
   useEffect(() => {
     setCurrentPage(1);
+    setCurrentPageUsufruto(1);
   }, [searchServidor, selectedCargo, selectedCycle]);
 
   // Dados paginados
@@ -348,14 +358,14 @@ export const Relatorios: React.FC = () => {
     }, { valor_folga_comp: 0, valor_plantao_plus: 0, total_a_pagar: 0 });
   }, [filteredFolha]);
 
-  const totalPagesUsufruto = Math.ceil(usufrutoData.length / itemsPerPage);
+  const totalPagesUsufruto = Math.ceil(filteredUsufruto.length / itemsPerPage);
   const paginatedUsufruto = useMemo(() => {
     const startIndex = (currentPageUsufruto - 1) * itemsPerPage;
-    return usufrutoData.slice(startIndex, startIndex + itemsPerPage);
-  }, [usufrutoData, currentPageUsufruto]);
+    return filteredUsufruto.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredUsufruto, currentPageUsufruto]);
 
   const exportUsufrutoExcel = () => {
-    const data = usufrutoData.map(r => ({
+    const data = filteredUsufruto.map(r => ({
       'Servidor': r.nome_servidor,
       'Matrícula': r.matricula,
       'Cargo': r.cargo_nome,
@@ -371,7 +381,7 @@ export const Relatorios: React.FC = () => {
   };
 
   const exportUsufrutoPDF = () => {
-    if (usufrutoData.length === 0) return alert('Nenhum dado para exportar.');
+    if (filteredUsufruto.length === 0) return alert('Nenhum dado para exportar.');
     setExportingPdf(true);
     try {
       const doc = new jsPDF('l', 'mm', 'a4');
@@ -391,7 +401,7 @@ export const Relatorios: React.FC = () => {
       autoTable(doc, {
         startY: 40,
         head: [['Servidor', 'Matrícula', 'Cargo', 'Ciclo', 'Data de Usufruto', 'Registrado por']],
-        body: usufrutoData.map(r => [r.nome_servidor, r.matricula, r.cargo_nome, r.ciclo_nome, r.data_usufruto, r.registrado_por]),
+        body: filteredUsufruto.map(r => [r.nome_servidor, r.matricula, r.cargo_nome, r.ciclo_nome, r.data_usufruto, r.registrado_por]),
         theme: 'striped',
         styles: { fontSize: 8, cellPadding: 3 },
         headStyles: { fillColor: [8, 145, 178], textColor: [255, 255, 255], fontStyle: 'bold' },
@@ -778,7 +788,7 @@ export const Relatorios: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {usufrutoData.length === 0 ? (
+                  {filteredUsufruto.length === 0 ? (
                     <tr>
                       <td colSpan={6} style={{ padding: '32px', textAlign: 'center', color: '#94a3b8' }}>
                         Nenhuma folga usufruída registrada para os filtros selecionados.
@@ -802,7 +812,7 @@ export const Relatorios: React.FC = () => {
               {totalPagesUsufruto > 1 && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderTop: '1px solid var(--color-border)', background: '#f8fafc' }}>
                   <div style={{ fontSize: '13px', color: '#64748b' }}>
-                    Mostrando {(currentPageUsufruto - 1) * itemsPerPage + 1} até {Math.min(currentPageUsufruto * itemsPerPage, usufrutoData.length)} de {usufrutoData.length} registros
+                    Mostrando {(currentPageUsufruto - 1) * itemsPerPage + 1} até {Math.min(currentPageUsufruto * itemsPerPage, filteredUsufruto.length)} de {filteredUsufruto.length} registros
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
