@@ -364,9 +364,19 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
-  const handleDesfazerUsufruto = async (folga: any) => {
-    if (!window.confirm(`Tem certeza que deseja excluir o registro de gozo de ${folga.employees?.nome}? A folga voltará para "Folgas Disponíveis para Compra" — o plantão que a gerou não é perdido.`)) return;
+  const handleDesfazerUsufruto = (folga: any) => {
+    setConfirmAction({
+      title: 'Excluir Registro de Gozo',
+      message: `Tem certeza que deseja excluir o registro de gozo de ${folga.employees?.nome}? A folga voltará para "Folgas Disponíveis para Compra" — o plantão que a gerou não é perdido.`,
+      confirmText: 'Sim, Excluir',
+      onConfirm: () => {
+        setConfirmAction(null);
+        executeDesfazerUsufruto(folga);
+      }
+    });
+  };
 
+  const executeDesfazerUsufruto = async (folga: any) => {
     setIsSubmitting(true);
     try {
       const { error } = await supabase
