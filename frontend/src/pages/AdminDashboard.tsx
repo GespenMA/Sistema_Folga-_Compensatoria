@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, fetchAll } from '../lib/supabase';
 import {
   Wallet, FileText, Landmark, Building2, Calendar, Bell,
   Download, Eye,
@@ -101,23 +101,13 @@ export const AdminDashboard: React.FC = () => {
         if (ciclo) {
           // 3. Solicitações de compra do ciclo. Paginado: o ciclo pode ter mais de
           // 1000 solicitações, e o Supabase corta silenciosamente sem o .range().
-          let reqs: any[] = [];
-          let reqsFrom = 0;
-          const reqsStep = 1000;
-          while (true) {
-            const { data: reqsPage, error: requestsError } = await supabase
-              .from('purchase_requests')
-              .select(`
-                id, valor, status, requested_at, establishment_id, position_id, tipo_solicitacao
-              `)
-              .eq('cycle_id', ciclo.id)
-              .range(reqsFrom, reqsFrom + reqsStep - 1);
-            if (requestsError) throw requestsError;
-            if (!reqsPage || reqsPage.length === 0) break;
-            reqs = reqs.concat(reqsPage);
-            if (reqsPage.length < reqsStep) break;
-            reqsFrom += reqsStep;
-          }
+          const reqsQuery = supabase
+            .from('purchase_requests')
+            .select(`
+              id, valor, status, requested_at, establishment_id, position_id, tipo_solicitacao
+            `)
+            .eq('cycle_id', ciclo.id);
+          const reqs = await fetchAll(reqsQuery);
           setRequests(reqs);
 
           // 4. Orçamentos por estabelecimento e Recálculo em tempo real

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, fetchAll } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { CheckCircle, XCircle, AlertCircle, Filter, ShoppingCart, Clock } from 'lucide-react';
 
@@ -114,9 +114,8 @@ export const Solicitacoes: React.FC = () => {
       if (selectedEst) q = q.eq('establishment_id', selectedEst);
       // Status filter is now client-side so stats can be computed accurately
 
-      const { data, error } = await q;
-      if (error) throw error;
-      
+      const data = await fetchAll(q);
+
       const { data: pvs } = await supabase.from('position_values').select('valor, position_id').is('vigencia_fim', null);
       const pvMap: Record<string, number> = {};
       if (pvs) pvs.forEach((p: any) => pvMap[p.position_id] = Number(p.valor));

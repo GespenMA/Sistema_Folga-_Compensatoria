@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, fetchAll } from '../../lib/supabase';
 import { useSearchParams } from 'react-router-dom';
 import { BadgeCheck, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 
@@ -138,9 +138,8 @@ export const Servidores: React.FC = () => {
       if (selectedPos) query = query.eq('position_id', selectedPos);
       if (searchTerm) query = query.or(`nome.ilike.%${searchTerm}%,matricula.ilike.%${searchTerm}%`);
 
-      const { data, error } = await query;
-      if (error) throw error;
-      
+      const data = await fetchAll(query);
+
       const counts: Record<string, number> = {};
       data?.forEach(d => {
         if (d.position_id) {

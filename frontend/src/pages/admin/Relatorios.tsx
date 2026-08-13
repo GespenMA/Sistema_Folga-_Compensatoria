@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase, fetchAll } from '../../lib/supabase';
 import * as XLSX from 'xlsx';
 import { FileText, Download, FileSpreadsheet, Filter, Building2, Users, DollarSign, TrendingUp, AlertCircle, CalendarCheck } from 'lucide-react';
 
@@ -79,22 +79,6 @@ type ActiveTab = 'orcado_gasto' | 'detalhe_est' | 'folha_servidor' | 'folgas_usu
 // =============================================
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
-
-const fetchAll = async (query: any) => {
-  let allData: any[] = [];
-  let from = 0;
-  const step = 1000;
-  while (true) {
-    const { data, error } = await query.range(from, from + step - 1);
-    if (error) throw error;
-    if (data && data.length > 0) {
-      allData = allData.concat(data);
-    }
-    if (!data || data.length < step) break;
-    from += step;
-  }
-  return allData;
-};
 
 // =============================================
 // COMPONENTE PRINCIPAL
