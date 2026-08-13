@@ -3,6 +3,12 @@ import { supabase, fetchAll } from '../../lib/supabase';
 import { useSearchParams } from 'react-router-dom';
 import { BadgeCheck, ChevronLeft, ChevronRight, Search } from 'lucide-react';
 
+// Remove caracteres com significado especial na sintaxe de filtro do PostgREST
+// (vírgula separa condições, ponto separa coluna.operador.valor, parênteses
+// agrupam) antes de montar a string do .or() — nome e matrícula nunca usam
+// esses caracteres legitimamente, então isso não muda nenhuma busca real.
+const sanitizeFilterTerm = (term: string) => term.replace(/[,.()]/g, '');
+
 type Position = {
   id: string;
   nome: string;
@@ -107,7 +113,8 @@ export const Servidores: React.FC = () => {
         query = query.eq('position_id', selectedPos);
       }
       if (searchTerm) {
-        query = query.or(`nome.ilike.%${searchTerm}%,matricula.ilike.%${searchTerm}%`);
+        const term = sanitizeFilterTerm(searchTerm);
+        query = query.or(`nome.ilike.%${term}%,matricula.ilike.%${term}%`);
       }
 
       // Ordenação e Paginação
@@ -136,7 +143,7 @@ export const Servidores: React.FC = () => {
       let query = supabase.from('employees').select('position_id');
       if (selectedEst) query = query.eq('establishment_id', selectedEst);
       if (selectedPos) query = query.eq('position_id', selectedPos);
-      if (searchTerm) query = query.or(`nome.ilike.%${searchTerm}%,matricula.ilike.%${searchTerm}%`);
+      if (searchTerm) query = query.or(`nome.ilike.%${sanitizeFilterTerm(searchTerm)}%,matricula.ilike.%${sanitizeFilterTerm(searchTerm)}%`);
 
       const data = await fetchAll(query);
 
