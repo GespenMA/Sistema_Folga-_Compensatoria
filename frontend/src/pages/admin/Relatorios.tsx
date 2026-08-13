@@ -320,18 +320,20 @@ export const Relatorios: React.FC = () => {
     const shiftData = await fetchAll(shiftQ);
 
     // 2. Busca compensatory_days (folgas geradas). Mesmo princípio: establishment_id
-    // fixo, não a lotação atual do servidor.
+    // fixo, não a lotação atual do servidor. Inclui o embed de employees para poder
+    // criar a linha do servidor mesmo que ele não tenha nenhum shift no ciclo.
     let compQ = supabase
       .from('compensatory_days')
-      .select('employee_id, status, quantidade_plantoes')
+      .select('employee_id, status, quantidade_plantoes, establishment_id, establishments ( nome ), employees ( id, matricula, nome, saldo_minutos, positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle);
     if (selectedEst) compQ = compQ.eq('establishment_id', selectedEst);
     const compData = await fetchAll(compQ);
 
-    // 3. Busca purchase_requests aprovadas
+    // 3. Busca purchase_requests aprovadas. Mesmo embed de employees — um Plantão Plus
+    // não gera nenhum shift, então sem isso o servidor nunca apareceria na folha.
     let prQ = supabase
       .from('purchase_requests')
-      .select('employee_id, valor, tipo_solicitacao, data_plantao')
+      .select('employee_id, valor, tipo_solicitacao, data_plantao, establishment_id, establishments ( nome ), employees ( id, matricula, nome, saldo_minutos, positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'APROVADA');
     if (selectedEst) prQ = prQ.eq('establishment_id', selectedEst);
@@ -341,10 +343,9 @@ export const Relatorios: React.FC = () => {
     // Agrupa por funcionário
     const empMap = new Map<string, FolhaServidorRow>();
 
-    for (const s of shiftData || []) {
-      const emp = (s.employees as any);
-      if (!emp) continue;
-
+    // Garante que o servidor tenha uma linha no mapa, seja qual for a fonte
+    // (shift, folga ou solicitação) que o trouxe primeiro.
+    const ensureRow = (emp: any, establishmentId: string, nomeEst: string): FolhaServidorRow => {
       const empId = emp.id;
       if (!empMap.has(empId)) {
         empMap.set(empId, {
@@ -353,8 +354,8 @@ export const Relatorios: React.FC = () => {
           nome: emp.nome || '',
           cargo_codigo: emp.positions?.codigo || '',
           cargo_nome: emp.positions?.nome || '',
-          establishment_id: (s as any).establishment_id || '',
-          nome_est: (s as any).establishments?.nome || '',
+          establishment_id: establishmentId || '',
+          nome_est: nomeEst || '',
           minutos_trabalhados: 0,
           plantoes_trabalhados: 0,
           folgas_geradas: 0,
@@ -367,27 +368,41 @@ export const Relatorios: React.FC = () => {
           datas_plantao: [],
         });
       }
-      empMap.get(empId)!.plantoes_trabalhados += Number(s.quantidade_plantoes || 0);
-      empMap.get(empId)!.minutos_trabalhados += (Number(s.quantidade_plantoes || 0) * 720) + Number(s.minutos_residuais || 0);
+      return empMap.get(empId)!;
+    };
+
+    for (const s of shiftData || []) {
+      const emp = (s.employees as any);
+      if (!emp) continue;
+
+      const row = ensureRow(emp, (s as any).establishment_id, (s as any).establishments?.nome);
+      row.plantoes_trabalhados += Number(s.quantidade_plantoes || 0);
+      row.minutos_trabalhados += (Number(s.quantidade_plantoes || 0) * 720) + Number(s.minutos_residuais || 0);
     }
 
     // Processa compensatory_days
     for (const c of compData || []) {
-      if (!empMap.has(c.employee_id)) continue;
-      empMap.get(c.employee_id)!.folgas_geradas++;
-      if (c.status === 'INDENIZADA') empMap.get(c.employee_id)!.folgas_compradas_qtd++;
+      const emp = (c as any).employees;
+      if (!emp) continue;
+
+      const row = ensureRow(emp, (c as any).establishment_id, (c as any).establishments?.nome);
+      row.folgas_geradas++;
+      if (c.status === 'INDENIZADA') row.folgas_compradas_qtd++;
     }
 
     // Processa purchase_requests
     for (const p of prData || []) {
-      if (!empMap.has(p.employee_id)) continue;
+      const emp = (p as any).employees;
+      if (!emp) continue;
+
+      const row = ensureRow(emp, (p as any).establishment_id, (p as any).establishments?.nome);
       if (p.tipo_solicitacao === 'PLANTAO_PLUS') {
-        empMap.get(p.employee_id)!.plantao_plus_qtd++;
-        empMap.get(p.employee_id)!.valor_plantao_plus += Number(p.valor);
+        row.plantao_plus_qtd++;
+        row.valor_plantao_plus += Number(p.valor);
       } else {
-        empMap.get(p.employee_id)!.valor_folga_comp += Number(p.valor);
+        row.valor_folga_comp += Number(p.valor);
       }
-      if (p.data_plantao) empMap.get(p.employee_id)!.datas_plantao.push(p.data_plantao);
+      if (p.data_plantao) row.datas_plantao.push(p.data_plantao);
     }
 
     // Calcula total a pagar e ordena as datas de plantão cronologicamente
