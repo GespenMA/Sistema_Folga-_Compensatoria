@@ -310,6 +310,17 @@ export const Relatorios: React.FC = () => {
   // TAB 3: Folha por Servidor
   // -------------------------------------------
   const loadFolhaServidor = async () => {
+    // 0. Busca todos os servidores que batem com os filtros (estabelecimento/cargo),
+    // mesmo os sem nenhum plantão/folga/solicitação neste ciclo — garante que a folha
+    // mostre o quadro completo, não só quem teve alguma movimentação.
+    let empQ = supabase
+      .from('employees')
+      .select('id, matricula, nome, saldo_minutos, establishment_id, establishments ( nome ), positions ( codigo, nome )')
+      .eq('ativo', true);
+    if (selectedEst) empQ = empQ.eq('establishment_id', selectedEst);
+    if (selectedCargo) empQ = empQ.eq('position_id', selectedCargo);
+    const allEmpData = await fetchAll(empQ);
+
     // 1. Busca shifts no ciclo (plantões trabalhados). establishment_id é fixo por
     // registro — onde o plantão aconteceu, não a lotação atual do servidor.
     let shiftQ = supabase
@@ -370,6 +381,13 @@ export const Relatorios: React.FC = () => {
       }
       return empMap.get(empId)!;
     };
+
+    // Semeia com todos os servidores que batem os filtros, mesmo sem nenhuma
+    // movimentação — usa a lotação atual (é a única disponível para quem não
+    // tem nenhum registro fixo neste ciclo).
+    for (const emp of allEmpData || []) {
+      ensureRow(emp, (emp as any).establishment_id, (emp as any).establishments?.nome);
+    }
 
     for (const s of shiftData || []) {
       const emp = (s.employees as any);

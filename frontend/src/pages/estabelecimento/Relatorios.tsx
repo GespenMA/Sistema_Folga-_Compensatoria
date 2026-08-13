@@ -202,6 +202,17 @@ export const Relatorios: React.FC = () => {
   const loadFolhaServidor = async () => {
     const estId = profile!.establishment_id!;
 
+    // 0. Busca todos os servidores da unidade, mesmo os sem nenhum plantão/folga/
+    // solicitação neste ciclo — garante que a folha mostre o quadro completo.
+    let empQ = supabase
+      .from('employees')
+      .select('id, matricula, nome, saldo_minutos, positions(codigo, nome)')
+      .eq('establishment_id', estId)
+      .eq('ativo', true);
+    if (selectedCargo) empQ = empQ.eq('position_id', selectedCargo);
+    const { data: allEmpData, error: empErr } = await empQ;
+    if (empErr) throw empErr;
+
     // 1. Busca shifts no ciclo. establishment_id é fixo por registro — onde o
     // plantão aconteceu, não a lotação atual do servidor.
     const { data: shiftData, error: shiftErr } = await supabase
@@ -261,6 +272,11 @@ export const Relatorios: React.FC = () => {
       }
       return empMap.get(empId)!;
     };
+
+    // Semeia com todos os servidores da unidade, mesmo sem nenhuma movimentação.
+    for (const emp of allEmpData || []) {
+      ensureRow(emp);
+    }
 
     for (const s of shiftData || []) {
       const emp = (s.employees as any);
