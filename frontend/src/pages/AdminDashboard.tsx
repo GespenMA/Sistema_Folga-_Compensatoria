@@ -103,7 +103,7 @@ export const AdminDashboard: React.FC = () => {
           const { data: reqs, error: requestsError } = await supabase
             .from('purchase_requests')
             .select(`
-              id, valor, status, requested_at, establishment_id, position_id
+              id, valor, status, requested_at, establishment_id, position_id, tipo_solicitacao
             `)
             .eq('cycle_id', ciclo.id);
           if (requestsError) throw requestsError;
@@ -243,6 +243,19 @@ export const AdminDashboard: React.FC = () => {
   const totalOrcado = useMemo(() => filteredCycleEstablishments.reduce((acc, curr) => acc + Number(curr.total_orcado || 0), 0), [filteredCycleEstablishments]);
   const valorReservado = useMemo(() => filteredRequests.filter(r => r.status === 'SOLICITADA').reduce((acc, r) => acc + Number(r.valor || 0), 0), [filteredRequests]);
   const valorAprovado = useMemo(() => filteredRequests.filter(r => r.status === 'APROVADA').reduce((acc, r) => acc + Number(r.valor || 0), 0), [filteredRequests]);
+  const valoresPorTipo = useMemo(() => {
+    const result = {
+      plantaoPlus: { aprovado: 0, aAprovar: 0 },
+      folgaComp: { aprovado: 0, aAprovar: 0 },
+    };
+    for (const r of filteredRequests) {
+      const valor = Number(r.valor || 0);
+      const bucket = r.tipo_solicitacao === 'PLANTAO_PLUS' ? result.plantaoPlus : result.folgaComp;
+      if (r.status === 'APROVADA') bucket.aprovado += valor;
+      else if (r.status === 'SOLICITADA') bucket.aAprovar += valor;
+    }
+    return result;
+  }, [filteredRequests]);
   const folgasCompradasCount = useMemo(() => filteredRequests.filter(r => r.status === 'APROVADA').length, [filteredRequests]);
   const pendentesCount = useMemo(() => filteredRequests.filter(r => r.status === 'SOLICITADA').length, [filteredRequests]);
 
@@ -804,18 +817,32 @@ export const AdminDashboard: React.FC = () => {
                <Landmark size={24} color="#2563eb" />
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, justifyContent: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-muted)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d97706' }}></span>Reservado</span>
-              <span style={{ fontWeight: 600 }}>{getFormatCurrency(valorReservado)}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, justifyContent: 'center' }}>
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '4px' }}>Plantão Plus</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>Aprovado</span>
+                <span style={{ fontWeight: 600, color: '#16a34a' }}>{getFormatCurrency(valoresPorTipo.plantaoPlus.aprovado)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>A Aprovar</span>
+                <span style={{ fontWeight: 600, color: '#d97706' }}>{getFormatCurrency(valoresPorTipo.plantaoPlus.aAprovar)}</span>
+              </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-muted)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a' }}></span>Aprovado</span>
-              <span style={{ fontWeight: 600 }}>{getFormatCurrency(valorAprovado)}</span>
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '4px' }}>Folga Compensatória</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>Aprovado</span>
+                <span style={{ fontWeight: 600, color: '#16a34a' }}>{getFormatCurrency(valoresPorTipo.folgaComp.aprovado)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>A Aprovar</span>
+                <span style={{ fontWeight: 600, color: '#d97706' }}>{getFormatCurrency(valoresPorTipo.folgaComp.aAprovar)}</span>
+              </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', opacity: 0.5 }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--color-text-muted)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#2563eb' }}></span>Pago</span>
-              <span style={{ fontWeight: 600 }}>R$ 0,00</span>
+            <div style={{ borderTop: '1px solid var(--color-divider)', paddingTop: '8px', display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+              <span style={{ fontWeight: 700 }}>Total</span>
+              <span style={{ fontWeight: 700 }}>{getFormatCurrency(valorAprovado + valorReservado)}</span>
             </div>
           </div>
         </div>
