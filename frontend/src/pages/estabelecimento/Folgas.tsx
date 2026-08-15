@@ -139,7 +139,11 @@ export const Folgas: React.FC = () => {
     }
   };
 
-  const fetchOrcamento = async (cycleId: string) => {
+  // Retorna o disponível recém-calculado (não só atualiza o estado) para que quem chama
+  // possa validar contra o valor mais fresco possível, sem depender do último render —
+  // fecha a janela entre "checar" e "gravar" o máximo que dá do lado do cliente. O
+  // trigger do banco continua sendo a autoridade final, isso é reforço, não substituição.
+  const fetchOrcamento = async (cycleId: string): Promise<number> => {
     try {
       const [{ data: ceData }, { data: comprometidos }] = await Promise.all([
         supabase
@@ -156,11 +160,18 @@ export const Folgas: React.FC = () => {
           .in('status', ['SOLICITADA', 'APROVADA']),
       ]);
 
-      setTotalOrcado(Number(ceData?.total_orcado || 0));
-      setTotalAprovado((comprometidos || []).filter((r: any) => r.status === 'APROVADA').reduce((acc, r: any) => acc + Number(r.valor), 0));
-      setTotalPendente((comprometidos || []).filter((r: any) => r.status === 'SOLICITADA').reduce((acc, r: any) => acc + Number(r.valor), 0));
+      const orcado = Number(ceData?.total_orcado || 0);
+      const aprovado = (comprometidos || []).filter((r: any) => r.status === 'APROVADA').reduce((acc, r: any) => acc + Number(r.valor), 0);
+      const pendente = (comprometidos || []).filter((r: any) => r.status === 'SOLICITADA').reduce((acc, r: any) => acc + Number(r.valor), 0);
+
+      setTotalOrcado(orcado);
+      setTotalAprovado(aprovado);
+      setTotalPendente(pendente);
+
+      return orcado - aprovado - pendente;
     } catch (err) {
       console.error(err);
+      return orcamentoDisponivel;
     }
   };
 
@@ -262,9 +273,12 @@ export const Folgas: React.FC = () => {
       showToast('A justificativa precisa ter pelo menos 50 caracteres.', 'warning');
       return;
     }
-    if (plusValorPreview !== null && plusValorPreview > orcamentoDisponivel) {
-      showToast(`Orçamento insuficiente — faltam R$ ${(plusValorPreview - orcamentoDisponivel).toFixed(2)}.`, 'error');
-      return;
+    if (plusValorPreview !== null) {
+      const orcamentoFresco = await fetchOrcamento(activeCycle.id);
+      if (plusValorPreview > orcamentoFresco) {
+        showToast(`Orçamento insuficiente — faltam R$ ${(plusValorPreview - orcamentoFresco).toFixed(2)}.`, 'error');
+        return;
+      }
     }
 
     setIsSubmittingPlus(true);
