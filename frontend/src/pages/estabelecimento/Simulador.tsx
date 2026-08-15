@@ -13,6 +13,7 @@ export const Simulador: React.FC = () => {
   const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [totalOrcado, setTotalOrcado] = useState(0);
+  const [totalComprometido, setTotalComprometido] = useState(0);
   const [cargos, setCargos] = useState<Cargo[]>([]);
   const [activeCycle, setActiveCycle] = useState<any>(null);
 
@@ -76,6 +77,18 @@ export const Simulador: React.FC = () => {
           });
           setTotalOrcado(recalc);
         }
+
+        // Orçamento já comprometido (Aprovado + Aguardando Aprovação) neste ciclo, para que o
+        // simulador projete a partir do saldo real, não do teto planejado original.
+        const { data: comprometidosData } = await supabase
+          .from('purchase_requests')
+          .select('valor')
+          .eq('cycle_id', cycleData.id)
+          .eq('establishment_id', profile!.establishment_id)
+          .in('status', ['SOLICITADA', 'APROVADA']);
+
+        const comprometido = (comprometidosData || []).reduce((acc: number, r: any) => acc + Number(r.valor), 0);
+        setTotalComprometido(comprometido);
       }
     } catch (err) {
       console.error(err);
@@ -100,7 +113,7 @@ export const Simulador: React.FC = () => {
       return acc + (qtd * cargo.valorFolga);
     }, 0);
     
-    const saldoAtual = totalOrcado - custoAtualSimulado;
+    const saldoAtual = (totalOrcado - totalComprometido) - custoAtualSimulado;
     if (saldoAtual <= 0) return; // Não há saldo
 
     const maxAdicional = Math.floor(saldoAtual / valorFolga);
@@ -136,7 +149,11 @@ export const Simulador: React.FC = () => {
     return acc + (quantidades[cargo.id] || 0);
   }, 0);
 
-  const saldoRestante = totalOrcado - custoTotalSimulado;
+  // Saldo real disponível para simular: teto planejado menos o que já está Aprovado ou
+  // Aguardando Aprovação — evita que o simulador ofereça um poder de compra que não existe mais.
+  const disponivelReal = totalOrcado - totalComprometido;
+
+  const saldoRestante = disponivelReal - custoTotalSimulado;
   const isEstourado = saldoRestante < 0;
 
   // Cores dinâmicas para o gráfico de barra
@@ -162,7 +179,7 @@ export const Simulador: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
           <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)' }}>Distribuição do Orçamento</span>
           <span style={{ fontSize: '13px', fontWeight: 600, color: isEstourado ? '#dc2626' : 'var(--color-text)' }}>
-            {((custoTotalSimulado / totalOrcado) * 100).toFixed(1)}% Comprometido
+            {((custoTotalSimulado / disponivelReal) * 100).toFixed(1)}% Comprometido
           </span>
         </div>
         <div style={{ width: '100%', height: '24px', background: 'var(--color-divider)', borderRadius: '12px', overflow: 'hidden', display: 'flex' }}>
@@ -170,7 +187,7 @@ export const Simulador: React.FC = () => {
             const qtd = quantidades[cargo.id] || 0;
             const gasto = qtd * cargo.valorFolga;
             if (gasto === 0) return null;
-            const widthPct = (gasto / Math.max(totalOrcado, custoTotalSimulado)) * 100;
+            const widthPct = (gasto / Math.max(disponivelReal, custoTotalSimulado)) * 100;
             return (
               <div 
                 key={cargo.id} 
@@ -198,7 +215,11 @@ export const Simulador: React.FC = () => {
         <div className="blueprint card elev-md" style={{ padding: 'var(--space-5)', textAlign: 'center', background: 'var(--color-surface)' }}>
           <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Orçamento Disponível</div>
           <div style={{ fontSize: '28px', fontWeight: 800 }}>
-            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalOrcado)}
+            {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(disponivelReal)}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+            de {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalOrcado)} orçado
+            {totalComprometido > 0 && <> · {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(totalComprometido)} já comprometido</>}
           </div>
         </div>
         
@@ -243,7 +264,7 @@ export const Simulador: React.FC = () => {
             ) : cargos.map((cargo) => {
               const qtd = quantidades[cargo.id] || 0;
               const subtotal = qtd * cargo.valorFolga;
-              const poderDeCompra = cargo.valorFolga > 0 ? Math.floor(totalOrcado / cargo.valorFolga) : 0;
+              const poderDeCompra = cargo.valorFolga > 0 ? Math.floor(Math.max(disponivelReal, 0) / cargo.valorFolga) : 0;
 
               return (
                 <tr key={cargo.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
@@ -291,7 +312,7 @@ export const Simulador: React.FC = () => {
       </div>
       
       <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: 'var(--space-3)', textAlign: 'right' }}>
-        * O <strong>Poder Máximo de Compra</strong> indica quantas folgas poderiam ser compradas caso o orçamento inteiro da unidade (100%) fosse direcionado apenas para este cargo.
+        * O <strong>Poder Máximo de Compra</strong> indica quantas folgas poderiam ser compradas caso o saldo disponível da unidade (já descontando o que está Aprovado ou Aguardando Aprovação) fosse direcionado apenas para este cargo.
       </div>
     </div>
   );
