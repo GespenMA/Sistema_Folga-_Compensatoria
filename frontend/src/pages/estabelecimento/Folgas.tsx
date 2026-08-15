@@ -38,6 +38,15 @@ export const Folgas: React.FC = () => {
   const [plusDataPlantao, setPlusDataPlantao] = useState('');
   const [plusJustificativa, setPlusJustificativa] = useState('');
   const [isSubmittingPlus, setIsSubmittingPlus] = useState(false);
+  const [plusValorPreview, setPlusValorPreview] = useState<number | null>(null);
+
+  // Orçamento da unidade (para bloquear o lançamento quando não houver orçamento
+  // suficiente já considerando o que está Aprovado + Aguardando Aprovação — mesmo
+  // cálculo que o banco usa para liberar a CRIAÇÃO de uma solicitação)
+  const [totalOrcado, setTotalOrcado] = useState(0);
+  const [totalAprovado, setTotalAprovado] = useState(0);
+  const [totalPendente, setTotalPendente] = useState(0);
+  const orcamentoDisponivel = totalOrcado - totalAprovado - totalPendente;
 
   // Filtros e busca
   const [busca, setBusca] = useState('');
@@ -86,6 +95,27 @@ export const Folgas: React.FC = () => {
     }
   }, [profile?.establishment_id]);
 
+  // Prévia do valor do lançamento assim que o servidor é escolhido no modal de Plantão Plus
+  useEffect(() => {
+    if (!plusEmployeeId) { setPlusValorPreview(null); return; }
+    const emp = employees.find(e => e.id === plusEmployeeId);
+    if (!emp || !emp.position_id) { setPlusValorPreview(null); return; }
+
+    let cancelado = false;
+    supabase
+      .from('position_values')
+      .select('valor')
+      .eq('position_id', emp.position_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelado) setPlusValorPreview(data ? Number(data.valor) : null);
+      });
+
+    return () => { cancelado = true; };
+  }, [plusEmployeeId, employees]);
+
   const fetchInitialData = async () => {
     setLoading(true);
     try {
@@ -99,13 +129,38 @@ export const Folgas: React.FC = () => {
 
       if (cycleData) {
         setActiveCycle(cycleData);
-        await fetchEmployees();
+        await Promise.all([fetchEmployees(), fetchOrcamento(cycleData.id)]);
       } else {
         setLoading(false);
       }
     } catch (err) {
       console.error(err);
       setLoading(false);
+    }
+  };
+
+  const fetchOrcamento = async (cycleId: string) => {
+    try {
+      const [{ data: ceData }, { data: comprometidos }] = await Promise.all([
+        supabase
+          .from('cycle_establishments')
+          .select('total_orcado')
+          .eq('cycle_id', cycleId)
+          .eq('establishment_id', profile!.establishment_id)
+          .maybeSingle(),
+        supabase
+          .from('purchase_requests')
+          .select('valor, status')
+          .eq('cycle_id', cycleId)
+          .eq('establishment_id', profile!.establishment_id)
+          .in('status', ['SOLICITADA', 'APROVADA']),
+      ]);
+
+      setTotalOrcado(Number(ceData?.total_orcado || 0));
+      setTotalAprovado((comprometidos || []).filter((r: any) => r.status === 'APROVADA').reduce((acc, r: any) => acc + Number(r.valor), 0));
+      setTotalPendente((comprometidos || []).filter((r: any) => r.status === 'SOLICITADA').reduce((acc, r: any) => acc + Number(r.valor), 0));
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -205,6 +260,10 @@ export const Folgas: React.FC = () => {
     }
     if (plusJustificativa.length < 50) {
       showToast('A justificativa precisa ter pelo menos 50 caracteres.', 'warning');
+      return;
+    }
+    if (plusValorPreview !== null && plusValorPreview > orcamentoDisponivel) {
+      showToast(`Orçamento insuficiente — faltam R$ ${(plusValorPreview - orcamentoDisponivel).toFixed(2)}.`, 'error');
       return;
     }
 
@@ -393,8 +452,8 @@ export const Folgas: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* KPIs - 4 cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '32px' }}>
+          {/* KPIs - 5 cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', marginBottom: '32px' }}>
             <div className="blueprint card elev-sm" style={{ padding: '14px 18px', background: 'var(--color-surface)' }}>
               <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Total de Servidores</div>
               <div style={{ fontSize: '28px', fontWeight: 800, marginTop: '4px' }}>{totalServidores}</div>
@@ -410,6 +469,19 @@ export const Folgas: React.FC = () => {
             <div className="blueprint card elev-sm" style={{ padding: '14px 18px', background: 'rgba(59,130,246,0.06)', borderLeft: '3px solid var(--color-primary)' }}>
               <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-primary)', fontWeight: 600 }}>📦 Total de Folgas</div>
               <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '4px' }}>{totalFolgas}</div>
+            </div>
+            <div className="blueprint card elev-sm" style={{
+              padding: '14px 18px',
+              background: orcamentoDisponivel > 0 ? 'rgba(16,185,129,0.06)' : 'rgba(239,68,68,0.06)',
+              borderLeft: `3px solid ${orcamentoDisponivel > 0 ? '#10b981' : 'var(--color-danger)'}`
+            }}>
+              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: orcamentoDisponivel > 0 ? '#10b981' : 'var(--color-danger)', fontWeight: 600 }}>💰 Disponível p/ Lançamento</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: orcamentoDisponivel > 0 ? '#10b981' : 'var(--color-danger)', marginTop: '4px' }}>
+                R$ {orcamentoDisponivel.toFixed(2)}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                já descontando Aprovado + Aguardando Aprovação
+              </div>
             </div>
           </div>
 
@@ -704,6 +776,32 @@ export const Folgas: React.FC = () => {
                 </select>
               </div>
 
+              {plusValorPreview !== null && (
+                plusValorPreview > orcamentoDisponivel ? (
+                  <div style={{
+                    marginBottom: 'var(--space-3)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px',
+                    background: 'rgba(239,68,68,0.08)', borderLeft: '4px solid var(--color-danger)', color: 'var(--color-danger)'
+                  }}>
+                    <div style={{ fontWeight: 700 }}>
+                      🚫 Orçamento insuficiente — faltam R$ {(plusValorPreview - orcamentoDisponivel).toFixed(2)}
+                    </div>
+                    <div style={{ marginTop: '4px' }}>
+                      Este lançamento (R$ {plusValorPreview.toFixed(2)}) não cabe no disponível (R$ {orcamentoDisponivel.toFixed(2)}).
+                    </div>
+                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed rgba(239,68,68,0.25)' }}>
+                      💡 Aprove ou rejeite solicitações pendentes em "Solicitar Compra" para liberar orçamento.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    marginBottom: 'var(--space-3)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px',
+                    background: 'rgba(16,185,129,0.08)', borderLeft: '4px solid #10b981', color: '#0d7a56'
+                  }}>
+                    Valor deste lançamento: <strong>R$ {plusValorPreview.toFixed(2)}</strong> — Disponível p/ lançamento: <strong>R$ {orcamentoDisponivel.toFixed(2)}</strong>
+                  </div>
+                )
+              )}
+
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
                 <label>Data do Plantão Extraordinário *</label>
                 <input 
@@ -726,16 +824,20 @@ export const Folgas: React.FC = () => {
                   required
                   placeholder="Justifique detalhadamente o motivo do plantão extraordinário..."
                   minLength={50}
-                  maxLength={2000}
+                  maxLength={1000}
                 />
                 <div style={{ fontSize: '11px', color: plusJustificativa.length < 50 ? 'var(--color-danger)' : 'var(--color-primary)', marginTop: '4px', textAlign: 'right' }}>
-                  {plusJustificativa.length}/50 caracteres mínimos
+                  {plusJustificativa.length}/1000 caracteres (mínimo 50)
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setIsPlusModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary blueprint" disabled={isSubmittingPlus}>
+                <button
+                  type="submit"
+                  className="btn btn-primary blueprint"
+                  disabled={isSubmittingPlus || (plusValorPreview !== null && plusValorPreview > orcamentoDisponivel)}
+                >
                   <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
                   {isSubmittingPlus ? 'Enviando...' : 'Solicitar Pagamento'}
                 </button>

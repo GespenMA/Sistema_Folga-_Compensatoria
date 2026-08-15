@@ -66,12 +66,27 @@ export const Solicitacoes: React.FC = () => {
   const [buscaFolga, setBuscaFolga] = useState('');
   const [filtroCargoFolga, setFiltroCargoFolga] = useState('');
 
+  // Filtros para Solicitações do Ciclo
+  const [buscaSolicitacoes, setBuscaSolicitacoes] = useState('');
+  const [filtroCargoSolicitacoes, setFiltroCargoSolicitacoes] = useState('');
+
+  // Filtros para Folgas Usufruídas
+  const [buscaUsufruidas, setBuscaUsufruidas] = useState('');
+  const [filtroCargoUsufruidas, setFiltroCargoUsufruidas] = useState('');
+
   // Modal de Confirmação Genérico
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
     message: string;
     onConfirm: () => void;
     confirmText?: string;
+  } | null>(null);
+
+  // Modal de Aviso/Erro Genérico (substitui alert() nativo)
+  const [infoModal, setInfoModal] = useState<{
+    title: string;
+    message: string;
+    type?: 'error' | 'warning';
   } | null>(null);
 
   // Status de Limite
@@ -103,6 +118,10 @@ export const Solicitacoes: React.FC = () => {
   useEffect(() => {
     setCurrentPageFolgas(1);
   }, [buscaFolga, filtroCargoFolga]);
+
+  useEffect(() => {
+    setCurrentPageSolicitacoes(1);
+  }, [buscaSolicitacoes, filtroCargoSolicitacoes]);
 
   useEffect(() => {
     if (profile?.establishment_id) {
@@ -182,40 +201,33 @@ export const Solicitacoes: React.FC = () => {
           .order('requested_at', { ascending: false });
           
         if (sols) {
-          // Atualiza as solicitações com o valor mais recente!
-          const mappedSols = (sols as any[]).map(s => {
-            if (s.position_id && vals[s.position_id]) {
-              s.valor = vals[s.position_id];
-            }
-            return s;
-          });
-          setSolicitacoes(mappedSols as unknown as Solicitacao[]);
+          // Mostra o valor efetivamente gravado (o mesmo que o banco usa pra orçamento),
+          // não um recálculo com o preço atual do cargo — o preço pode ter mudado depois
+          // que a solicitação foi criada, mas o valor já cobrado/reservado é o gravado.
+          setSolicitacoes(sols as unknown as Solicitacao[]);
         }
 
-        // 5. Calcular saldo do orçamento disponível recálculado
+        // 5. Saldo do orçamento disponível: usa o total_orçado GRAVADO no banco (o mesmo
+        // valor que os triggers de criação e aprovação usam), não um recálculo com o
+        // preço atual do cargo — que pode estar dessincronizado do total_orçado gravado.
         const { data: ceData } = await supabase
           .from('cycle_establishments')
-          .select('total_orcado, planning_limits(quantidade_planejada, position_id)')
+          .select('total_orcado')
           .eq('cycle_id', cycleData.id)
           .eq('establishment_id', profile!.establishment_id)
           .maybeSingle();
 
-        let orcado = 0;
-        if (ceData && ceData.planning_limits) {
-          ceData.planning_limits.forEach((pl: any) => {
-             orcado += (pl.quantidade_planejada || 0) * (vals[pl.position_id] || 0);
-          });
-        }
+        const orcado = Number(ceData?.total_orcado || 0);
 
         const solsList = (sols || []) as any[];
         const consumido = solsList
           .filter(s => s.status === 'APROVADA')
-          .reduce((acc, curr) => acc + Number(vals[curr.position_id] || curr.valor), 0);
+          .reduce((acc, curr) => acc + Number(curr.valor), 0);
 
         const empenhado = solsList
           .filter(s => s.status === 'SOLICITADA')
-          .reduce((acc, curr) => acc + Number(vals[curr.position_id] || curr.valor), 0);
-          
+          .reduce((acc, curr) => acc + Number(curr.valor), 0);
+
         setTotalOrcado(orcado);
         setTotalGasto(consumido);
         setTotalEmpenhado(empenhado);
@@ -272,11 +284,20 @@ export const Solicitacoes: React.FC = () => {
   const handleComprar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFolga || !profile || !activeCycle) return;
-    
+
     const valorTotal = valorUnitario * selectedFolga.quantidade_plantoes;
 
-    // Antiga trava de orçamento (removida): o frontend não bloqueia a CRIAÇÃO da solicitação (Fila). 
-    // O bloqueio real de limite de orçamento ocorre no Banco de Dados (Trigger) no momento da APROVAÇÃO.
+    // Trava de orçamento na criação: considera Aprovado + Aguardando Aprovação, não só
+    // Aprovado — evita criar pedidos que, somados ao que já está na fila, não vão caber
+    // no orçamento quando chegar a hora de aprovar.
+    if (valorTotal > disponivelParaLancamento) {
+      setInfoModal({
+        title: '🚫 Orçamento Insuficiente',
+        message: `Faltam R$ ${(valorTotal - disponivelParaLancamento).toFixed(2)} para solicitar esta compra.\n\nEsta solicitação: R$ ${valorTotal.toFixed(2)}\nDisponível p/ novo lançamento: R$ ${disponivelParaLancamento.toFixed(2)}\n\nAprove ou rejeite as solicitações pendentes para liberar orçamento.`,
+        type: 'error'
+      });
+      return;
+    }
 
     if (dataPlantao > activeCycle.data_fim) {
       alert(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`);
@@ -431,10 +452,27 @@ export const Solicitacoes: React.FC = () => {
       return;
     }
 
+    const folgasToBuy = folgasDisponiveis.filter(f => selectedFolgas.includes(f.id));
+
+    // Trava de orçamento no lote inteiro, antes de gravar qualquer uma — soma o valor de
+    // TODAS as folgas selecionadas contra o disponível (Aprovado + Aguardando Aprovação já
+    // descontados). Checar uma por uma durante o loop deixaria parte solicitada e parte não.
+    const valorTotalLote = folgasToBuy.reduce((acc, f) => {
+      const preco = positionValues[f.employees?.positions?.id] || 0;
+      return acc + preco * f.quantidade_plantoes;
+    }, 0);
+
+    if (valorTotalLote > disponivelParaLancamento) {
+      setInfoModal({
+        title: '🚫 Orçamento Insuficiente para o Lote',
+        message: `Faltam R$ ${(valorTotalLote - disponivelParaLancamento).toFixed(2)} para solicitar este lote.\n\nTotal das ${folgasToBuy.length} folgas selecionadas: R$ ${valorTotalLote.toFixed(2)}\nDisponível p/ novo lançamento: R$ ${disponivelParaLancamento.toFixed(2)}\n\nDesmarque algumas folgas, ou aprove/rejeite pendências para liberar orçamento.`,
+        type: 'error'
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     let erroredCount = 0;
-    
-    const folgasToBuy = folgasDisponiveis.filter(f => selectedFolgas.includes(f.id));
 
     for (const folga of folgasToBuy) {
       try {
@@ -561,6 +599,19 @@ export const Solicitacoes: React.FC = () => {
 
   const handleBulkApprove = () => {
     if (selectedRequests.length === 0) return;
+
+    const selecionadas = solicitacoes.filter(s => selectedRequests.includes(s.id));
+    const totalSelecionado = selecionadas.reduce((acc, s) => acc + Number(s.valor), 0);
+
+    if (totalSelecionado > orcamentoDisponivel) {
+      setInfoModal({
+        title: '🚫 Orçamento Insuficiente',
+        message: `O total das ${selectedRequests.length} solicitações selecionadas é de R$ ${totalSelecionado.toFixed(2)}, mas o orçamento disponível é de apenas R$ ${orcamentoDisponivel.toFixed(2)}.\n\nDesmarque algumas solicitações ou aprove-as individualmente até o limite disponível.`,
+        type: 'error'
+      });
+      return;
+    }
+
     setConfirmAction({
       title: 'Aprovar Solicitações',
       message: `Tem certeza que deseja APROVAR as ${selectedRequests.length} solicitações selecionadas? O valor será debitado do orçamento permanentemente.`,
@@ -599,7 +650,11 @@ export const Solicitacoes: React.FC = () => {
         }
       } catch (err: any) {
         if (err.message?.includes('ORCAMENTO_EXCEDIDO')) {
-          alert(err.message.replace('ORCAMENTO_EXCEDIDO: ', '🚫 BLOQUEIO DO SISTEMA (Orçamento Excedido):\n\n') + `\n\n(Parando a aprovação em lote nas demais solicitações)`);
+          setInfoModal({
+            title: '🚫 Bloqueio do Sistema (Orçamento Excedido)',
+            message: err.message.replace('ORCAMENTO_EXCEDIDO: ', '') + '\n\n(A aprovação em lote foi interrompida nas demais solicitações)',
+            type: 'error'
+          });
           break; // Stop bulk processing if budget exceeded
         } else {
           console.error(err);
@@ -607,17 +662,29 @@ export const Solicitacoes: React.FC = () => {
         }
       }
     }
-    
+
     if (errorCount > 0) {
-      alert(`Houve erro ao aprovar ${errorCount} solicitação(ões). As demais foram processadas.`);
+      setInfoModal({
+        title: 'Erro ao Aprovar',
+        message: `Houve erro ao aprovar ${errorCount} solicitação(ões). As demais foram processadas.`,
+        type: 'error'
+      });
     }
-    
+
     setSelectedRequests([]);
     setIsSubmitting(false);
     fetchData(false);
   };
 
   const handleApproveRequest = (solicitacao: Solicitacao) => {
+    if (Number(solicitacao.valor) > orcamentoDisponivel) {
+      setInfoModal({
+        title: '🚫 Orçamento Insuficiente',
+        message: `Não é possível aprovar esta solicitação agora.\n\nValor da solicitação: R$ ${Number(solicitacao.valor).toFixed(2)}\nOrçamento disponível: R$ ${orcamentoDisponivel.toFixed(2)}`,
+        type: 'error'
+      });
+      return;
+    }
     setConfirmAction({
       title: 'Aprovar Compra',
       message: 'Tem certeza que deseja APROVAR esta compra? O valor será debitado do orçamento permanentemente.',
@@ -653,9 +720,17 @@ export const Solicitacoes: React.FC = () => {
       fetchData(false);
     } catch (err: any) {
       if (err.message?.includes('ORCAMENTO_EXCEDIDO')) {
-        alert(err.message.replace('ORCAMENTO_EXCEDIDO: ', '🚫 BLOQUEIO DO SISTEMA:\n\n'));
+        setInfoModal({
+          title: '🚫 Bloqueio do Sistema',
+          message: err.message.replace('ORCAMENTO_EXCEDIDO: ', ''),
+          type: 'error'
+        });
       } else {
-        alert(err.message || "Erro ao aprovar.");
+        setInfoModal({
+          title: 'Erro ao Aprovar',
+          message: err.message || 'Erro ao aprovar.',
+          type: 'error'
+        });
       }
     }
   };
@@ -691,6 +766,11 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
+  // Disponível para CRIAR um novo pedido: desconta Aprovado + Aguardando Aprovação.
+  // Diferente de orcamentoDisponivel (só desconta Aprovado), que é o número certo para
+  // decidir se um pedido específico pode ser APROVADO agora.
+  const disponivelParaLancamento = totalOrcado - totalGasto - totalEmpenhado;
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'SOLICITADA': return <span className="tag" style={{ background: '#d97706', color: 'white' }}>AGUARDANDO APROVAÇÃO</span>;
@@ -699,9 +779,27 @@ export const Solicitacoes: React.FC = () => {
       default: return <span className="tag">{status}</span>;
     }
   };
+  const cargosDisponiveisSolicitacoes = React.useMemo(() => Array.from(
+    new Map(solicitacoes
+      .filter(s => s.employees?.positions?.nome)
+      .map(s => [s.employees.positions.codigo, s.employees.positions.nome])
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR')), [solicitacoes]);
+
+  const filteredSolicitacoes = React.useMemo(() => {
+    return solicitacoes.filter(s => {
+      const termo = buscaSolicitacoes.toLowerCase();
+      const matchBusca = !termo ||
+        (s.employees?.nome || '').toLowerCase().includes(termo) ||
+        (s.employees?.matricula || '').toLowerCase().includes(termo);
+      const matchCargo = !filtroCargoSolicitacoes || s.employees?.positions?.codigo === filtroCargoSolicitacoes;
+      return matchBusca && matchCargo;
+    });
+  }, [solicitacoes, buscaSolicitacoes, filtroCargoSolicitacoes]);
+
   const sortedSolicitacoes = React.useMemo(() => {
-    if (!sortColumnSol) return solicitacoes;
-    const sorted = [...solicitacoes].sort((a, b) => {
+    if (!sortColumnSol) return filteredSolicitacoes;
+    const sorted = [...filteredSolicitacoes].sort((a, b) => {
       if (sortColumnSol === 'servidor') {
         return (a.employees?.nome || '').localeCompare(b.employees?.nome || '', 'pt-BR');
       }
@@ -722,11 +820,29 @@ export const Solicitacoes: React.FC = () => {
       return 0;
     });
     return sortDirectionSol === 'asc' ? sorted : sorted.reverse();
-  }, [solicitacoes, sortColumnSol, sortDirectionSol]);
+  }, [filteredSolicitacoes, sortColumnSol, sortDirectionSol]);
+
+  const cargosDisponiveisUsufruidas = React.useMemo(() => Array.from(
+    new Map(folgasUsufruidas
+      .filter(f => f.employees?.positions?.nome)
+      .map(f => [f.employees.positions.codigo, f.employees.positions.nome])
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR')), [folgasUsufruidas]);
+
+  const filteredFolgasUsufruidas = React.useMemo(() => {
+    return folgasUsufruidas.filter(f => {
+      const termo = buscaUsufruidas.toLowerCase();
+      const matchBusca = !termo ||
+        (f.employees?.nome || '').toLowerCase().includes(termo) ||
+        (f.employees?.matricula || '').toLowerCase().includes(termo);
+      const matchCargo = !filtroCargoUsufruidas || f.employees?.positions?.codigo === filtroCargoUsufruidas;
+      return matchBusca && matchCargo;
+    });
+  }, [folgasUsufruidas, buscaUsufruidas, filtroCargoUsufruidas]);
 
   const sortedFolgasUsufruidas = React.useMemo(() => {
-    if (!sortColumnUsufruida) return folgasUsufruidas;
-    const sorted = [...folgasUsufruidas].sort((a, b) => {
+    if (!sortColumnUsufruida) return filteredFolgasUsufruidas;
+    const sorted = [...filteredFolgasUsufruidas].sort((a, b) => {
       if (sortColumnUsufruida === 'servidor') {
         return (a.employees?.nome || '').localeCompare(b.employees?.nome || '', 'pt-BR');
       }
@@ -736,7 +852,7 @@ export const Solicitacoes: React.FC = () => {
       return 0;
     });
     return sortDirectionUsufruida === 'asc' ? sorted : sorted.reverse();
-  }, [folgasUsufruidas, sortColumnUsufruida, sortDirectionUsufruida]);
+  }, [filteredFolgasUsufruidas, sortColumnUsufruida, sortDirectionUsufruida]);
 
   const totalPagesSolicitacoes = Math.ceil(sortedSolicitacoes.length / ITEMS_PER_PAGE);
   const paginatedSolicitacoes = React.useMemo(() => {
@@ -1025,6 +1141,29 @@ export const Solicitacoes: React.FC = () => {
               Apenas as solicitações com status de <strong>"Aprovada"</strong> serão processadas para pagamento na folha. Compete à <strong>Direção do Estabelecimento Penal</strong> realizar essa aprovação das pendências na tabela abaixo.
             </div>
           </div>
+
+          <div style={{ display: 'flex', gap: '12px', marginBottom: 'var(--space-3)', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              className="input"
+              placeholder="🔍 Buscar por nome ou matrícula..."
+              value={buscaSolicitacoes}
+              onChange={e => setBuscaSolicitacoes(e.target.value)}
+              style={{ flex: 1, minWidth: '180px' }}
+            />
+            <select
+              className="input"
+              style={{ width: '220px' }}
+              value={filtroCargoSolicitacoes}
+              onChange={e => setFiltroCargoSolicitacoes(e.target.value)}
+            >
+              <option value="">Todos os cargos</option>
+              {cargosDisponiveisSolicitacoes.map(([codigo, nome]) => (
+                <option key={codigo} value={codigo}>{nome}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="blueprint card elev-sm" style={{ overflowX: 'auto' }}>
             <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
@@ -1055,6 +1194,12 @@ export const Solicitacoes: React.FC = () => {
                   <tr>
                     <td colSpan={7} data-label="" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                       Nenhuma solicitação de compra feita neste ciclo.
+                    </td>
+                  </tr>
+                ) : filteredSolicitacoes.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} data-label="" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                      Nenhuma solicitação encontrada com esse filtro.
                     </td>
                   </tr>
                 ) : paginatedSolicitacoes.map(sol => (
@@ -1119,7 +1264,7 @@ export const Solicitacoes: React.FC = () => {
             {totalPagesSolicitacoes > 1 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-3) var(--space-4)', borderTop: '1px solid var(--color-divider)' }}>
                 <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                  Mostrando {(currentPageSolicitacoes - 1) * ITEMS_PER_PAGE + 1} até {Math.min(currentPageSolicitacoes * ITEMS_PER_PAGE, solicitacoes.length)} de {solicitacoes.length} solicitações
+                  Mostrando {(currentPageSolicitacoes - 1) * ITEMS_PER_PAGE + 1} até {Math.min(currentPageSolicitacoes * ITEMS_PER_PAGE, filteredSolicitacoes.length)} de {filteredSolicitacoes.length} solicitações
                 </span>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '12px' }} disabled={currentPageSolicitacoes === 1} onClick={() => setCurrentPageSolicitacoes(p => p - 1)}>
@@ -1136,6 +1281,28 @@ export const Solicitacoes: React.FC = () => {
           )}
 
           {activeRightTab === 'USUFRUIDAS' && (
+            <>
+              <div style={{ display: 'flex', gap: '12px', marginBottom: 'var(--space-3)', flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="🔍 Buscar por nome ou matrícula..."
+                  value={buscaUsufruidas}
+                  onChange={e => setBuscaUsufruidas(e.target.value)}
+                  style={{ flex: 1, minWidth: '180px' }}
+                />
+                <select
+                  className="input"
+                  style={{ width: '220px' }}
+                  value={filtroCargoUsufruidas}
+                  onChange={e => setFiltroCargoUsufruidas(e.target.value)}
+                >
+                  <option value="">Todos os cargos</option>
+                  {cargosDisponiveisUsufruidas.map(([codigo, nome]) => (
+                    <option key={codigo} value={codigo}>{nome}</option>
+                  ))}
+                </select>
+              </div>
             <div className="blueprint card elev-sm" style={{ padding: 0, background: 'var(--color-surface)', overflowX: 'auto' }}>
               <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                 <thead>
@@ -1146,10 +1313,16 @@ export const Solicitacoes: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedFolgasUsufruidas.length === 0 ? (
+                  {folgasUsufruidas.length === 0 ? (
                     <tr>
                       <td colSpan={3} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                         Nenhuma folga usufruída registrada neste ciclo.
+                      </td>
+                    </tr>
+                  ) : sortedFolgasUsufruidas.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                        Nenhuma folga usufruída encontrada com esse filtro.
                       </td>
                     </tr>
                   ) : sortedFolgasUsufruidas.map(f => (
@@ -1191,6 +1364,7 @@ export const Solicitacoes: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
       </div>
@@ -1223,11 +1397,52 @@ export const Solicitacoes: React.FC = () => {
               <div style={{ background: 'var(--color-bg)', padding: 'var(--space-3)', borderRadius: '4px', marginBottom: 'var(--space-4)' }}>
                 <div style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '8px' }}>Solicitação em Lote</div>
                 <div><strong>Folgas Selecionadas:</strong> {selectedFolgas.length}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 'bold', marginTop: '8px' }}>
+                  <span>Valor Total Solicitado:</span>
+                  <span style={{ color: 'var(--color-primary)' }}>
+                    R$ {folgasDisponiveis.filter(f => selectedFolgas.includes(f.id)).reduce((acc, f) => acc + (positionValues[f.employees?.positions?.id] || 0) * f.quantidade_plantoes, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
                 <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
                   O mesmo motivo e data de plantão serão aplicados para todas as folgas.
                 </div>
               </div>
             )}
+
+            {(() => {
+              const valorPreviewModal = selectedFolga
+                ? valorUnitario * selectedFolga.quantidade_plantoes
+                : folgasDisponiveis.filter(f => selectedFolgas.includes(f.id)).reduce((acc, f) => acc + (positionValues[f.employees?.positions?.id] || 0) * f.quantidade_plantoes, 0);
+              const estoura = valorPreviewModal > disponivelParaLancamento;
+
+              if (estoura) {
+                return (
+                  <div style={{
+                    marginBottom: 'var(--space-4)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px',
+                    background: 'rgba(239,68,68,0.08)', borderLeft: '4px solid var(--color-danger)', color: 'var(--color-danger)'
+                  }}>
+                    <div style={{ fontWeight: 700 }}>
+                      🚫 Orçamento insuficiente — faltam R$ {(valorPreviewModal - disponivelParaLancamento).toFixed(2)}
+                    </div>
+                    <div style={{ marginTop: '4px' }}>
+                      {selectedFolga ? 'Esta solicitação' : 'Este lote'} (R$ {valorPreviewModal.toFixed(2)}) não cabe no disponível (R$ {disponivelParaLancamento.toFixed(2)}).
+                    </div>
+                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed rgba(239,68,68,0.25)' }}>
+                      💡 Aprove ou rejeite as solicitações pendentes na tabela ao lado para liberar orçamento.
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{
+                  marginBottom: 'var(--space-4)', padding: '10px 14px', borderRadius: '8px', fontSize: '13px',
+                  background: 'rgba(16,185,129,0.08)', borderLeft: '4px solid #10b981', color: '#0d7a56'
+                }}>
+                  Disponível p/ novo lançamento: <strong>R$ {disponivelParaLancamento.toFixed(2)}</strong>
+                </div>
+              );
+            })()}
 
             <form onSubmit={selectedFolga ? handleComprar : handleBulkComprarForm}>
               <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
@@ -1250,21 +1465,28 @@ export const Solicitacoes: React.FC = () => {
                   onChange={(e) => setJustificativa(e.target.value)} 
                   rows={4}
                   minLength={50}
-                  maxLength={2000}
+                  maxLength={1000}
                   required
                   placeholder="Explique a necessidade operacional que motivou a compra desta folga..."
                 />
                 <div style={{ fontSize: '11px', color: justificativa.length < 50 ? 'var(--color-danger)' : 'var(--color-text-muted)', marginTop: '4px', textAlign: 'right' }}>
-                  {justificativa.length} / 2000
+                  {justificativa.length} / 1000
                 </div>
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setIsModalOpen(false)}>Cancelar</button>
-                <button 
-                  type="submit" 
-                  className="btn btn-primary blueprint" 
-                  disabled={isSubmitting || justificativa.length < 50}
+                <button
+                  type="submit"
+                  className="btn btn-primary blueprint"
+                  disabled={
+                    isSubmitting ||
+                    justificativa.length < 50 ||
+                    (selectedFolga
+                      ? valorUnitario * selectedFolga.quantidade_plantoes
+                      : folgasDisponiveis.filter(f => selectedFolgas.includes(f.id)).reduce((acc, f) => acc + (positionValues[f.employees?.positions?.id] || 0) * f.quantidade_plantoes, 0)
+                    ) > disponivelParaLancamento
+                  }
                 >
                   <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
                   {isSubmitting ? 'Enviando...' : 'Confirmar Solicitação'}
@@ -1294,6 +1516,35 @@ export const Solicitacoes: React.FC = () => {
               >
                 <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
                 {confirmAction.confirmText || 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Aviso/Erro Genérico */}
+      {infoModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div className="blueprint card elev-md" style={{ width: '420px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
+            <h3 style={{
+              marginTop: 0, marginBottom: 'var(--space-4)',
+              color: infoModal.type === 'warning' ? '#b45309' : '#b91c1c'
+            }}>
+              {infoModal.title}
+            </h3>
+            <p style={{ color: 'var(--color-text)', marginBottom: 'var(--space-5)', lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+              {infoModal.message}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-primary blueprint"
+                onClick={() => setInfoModal(null)}
+              >
+                <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+                Entendi
               </button>
             </div>
           </div>
