@@ -78,9 +78,11 @@ export const Solicitacoes: React.FC = () => {
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
     message: string;
-    onConfirm: () => void;
+    onConfirm: (reason: string) => void;
     confirmText?: string;
+    reason?: { label: string; placeholder?: string; minLength?: number; maxLength?: number };
   } | null>(null);
+  const [confirmReasonValue, setConfirmReasonValue] = useState('');
 
   // Modal de Aviso/Erro Genérico (substitui alert() nativo)
   const [infoModal, setInfoModal] = useState<{
@@ -250,7 +252,7 @@ export const Solicitacoes: React.FC = () => {
       // Buscar o valor atual do cargo para calcular
       const positionId = folga.employees?.positions?.id;
       if (!positionId) {
-        alert("Erro: O cargo deste servidor não foi encontrado.");
+        setInfoModal({ title: 'Erro', message: 'O cargo deste servidor não foi encontrado.', type: 'error' });
         return;
       }
 
@@ -263,7 +265,7 @@ export const Solicitacoes: React.FC = () => {
         .maybeSingle();
         
       if (error) {
-        alert("Erro no banco de dados: " + error.message);
+        setInfoModal({ title: 'Erro no Banco de Dados', message: error.message, type: 'error' });
         return;
       }
 
@@ -271,13 +273,13 @@ export const Solicitacoes: React.FC = () => {
         setValorUnitario(posVal.valor);
         setValorHistoricoId(posVal.id);
       } else {
-        alert("Erro: O cargo deste servidor não possui valor configurado. Entre em contato com o gestor.");
+        setInfoModal({ title: 'Erro', message: 'O cargo deste servidor não possui valor configurado. Entre em contato com o gestor.', type: 'error' });
         return;
       }
 
       setIsModalOpen(true);
     } catch (err: any) {
-      alert("Erro inesperado: " + err.message);
+      setInfoModal({ title: 'Erro Inesperado', message: err.message, type: 'error' });
     }
   };
 
@@ -300,7 +302,7 @@ export const Solicitacoes: React.FC = () => {
     }
 
     if (dataPlantao > activeCycle.data_fim) {
-      alert(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`);
+      setInfoModal({ title: 'Data Inválida', message: 'A data do plantão não pode ultrapassar o encerramento do ciclo atual.', type: 'error' });
       return;
     }
 
@@ -317,7 +319,7 @@ export const Solicitacoes: React.FC = () => {
         .limit(1);
 
       if (existingPlus && existingPlus.length > 0) {
-        alert('Este servidor já possui uma solicitação ou compra de plantão para esta mesma data.');
+        setInfoModal({ title: 'Data Duplicada', message: 'Este servidor já possui uma solicitação ou compra de plantão para esta mesma data.', type: 'warning' });
         setIsSubmitting(false);
         return;
       }
@@ -358,7 +360,7 @@ export const Solicitacoes: React.FC = () => {
       setIsModalOpen(false);
       fetchData(false); // Recarrega tudo para atualizar saldos e tabelas, sem loading na tela toda
     } catch (err: any) {
-      alert(err.message || "Erro ao solicitar compra da folga.");
+      setInfoModal({ title: 'Erro', message: err.message || 'Erro ao solicitar compra da folga.', type: 'error' });
     } finally {
       setIsSubmitting(false);
     }
@@ -390,7 +392,7 @@ export const Solicitacoes: React.FC = () => {
       setIsUsufrutoModalOpen(false);
       fetchData(false);
     } catch (err: any) {
-      alert(err.message || "Erro ao registrar usufruto.");
+      setInfoModal({ title: 'Erro', message: err.message || 'Erro ao registrar usufruto.', type: 'error' });
     } finally {
       setIsSubmitting(false);
     }
@@ -424,7 +426,7 @@ export const Solicitacoes: React.FC = () => {
 
       fetchData(false);
     } catch (err: any) {
-      alert(err.message || "Erro ao excluir o registro de gozo.");
+      setInfoModal({ title: 'Erro', message: err.message || 'Erro ao excluir o registro de gozo.', type: 'error' });
     } finally {
       setIsSubmitting(false);
     }
@@ -443,12 +445,12 @@ export const Solicitacoes: React.FC = () => {
     if (selectedFolgas.length === 0 || !profile || !activeCycle || !dataPlantao) return;
     
     if (dataPlantao > activeCycle.data_fim) {
-      alert(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`);
+      setInfoModal({ title: 'Data Inválida', message: 'A data do plantão não pode ultrapassar o encerramento do ciclo atual.', type: 'error' });
       return;
     }
 
     if (justificativa.length < 50) {
-      alert("A justificativa precisa ter pelo menos 50 caracteres.");
+      setInfoModal({ title: 'Justificativa Curta', message: 'A justificativa precisa ter pelo menos 50 caracteres.', type: 'warning' });
       return;
     }
 
@@ -541,17 +543,21 @@ export const Solicitacoes: React.FC = () => {
     setIsModalOpen(false);
     setSelectedFolgas([]);
     if (erroredCount > 0) {
-      alert(`Ocorreu um erro ou bloqueio de duplicidade em ${erroredCount} folga(s). As demais foram solicitadas com sucesso.`);
+      setInfoModal({
+        title: 'Algumas Folgas Não Foram Solicitadas',
+        message: `Ocorreu um erro ou bloqueio de duplicidade em ${erroredCount} folga(s). As demais foram solicitadas com sucesso.`,
+        type: 'error'
+      });
     }
     fetchData(false);
   };
 
   const handleCancelRequest = (solicitacao: Solicitacao) => {
     if (solicitacao.status !== 'SOLICITADA' && solicitacao.status !== 'APROVADA') {
-      alert('Apenas solicitações aguardando aprovação ou aprovadas podem ser canceladas.');
+      setInfoModal({ title: 'Ação Não Permitida', message: 'Apenas solicitações aguardando aprovação ou aprovadas podem ser canceladas.', type: 'warning' });
       return;
     }
-    
+
     setConfirmAction({
       title: 'Cancelar Solicitação',
       message: 'Tem certeza que deseja cancelar? O orçamento será devolvido e a folga voltará a ficar disponível.',
@@ -593,7 +599,7 @@ export const Solicitacoes: React.FC = () => {
 
       fetchData(false); // Recarrega tudo
     } catch (err: any) {
-      alert(err.message || "Erro ao cancelar solicitação.");
+      setInfoModal({ title: 'Erro', message: err.message || 'Erro ao cancelar solicitação.', type: 'error' });
     }
   };
 
@@ -735,14 +741,25 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
-  const handleRejectRequest = async (solicitacao: Solicitacao) => {
-    const reason = window.prompt('Qual o motivo da rejeição? (O orçamento será devolvido e a folga voltará a ficar disponível)');
-    if (!reason) return; // cancelou o prompt
+  const handleRejectRequest = (solicitacao: Solicitacao) => {
+    setConfirmReasonValue('');
+    setConfirmAction({
+      title: 'Rejeitar Solicitação',
+      message: 'O orçamento será devolvido e a folga voltará a ficar disponível.',
+      confirmText: 'Rejeitar',
+      reason: { label: 'Motivo da rejeição *', placeholder: 'Explique o motivo da rejeição...', minLength: 1, maxLength: 500 },
+      onConfirm: (reason) => {
+        setConfirmAction(null);
+        executeRejectRequest(solicitacao, reason);
+      }
+    });
+  };
 
+  const executeRejectRequest = async (solicitacao: Solicitacao, reason: string) => {
     try {
       const { error: reqError } = await supabase
         .from('purchase_requests')
-        .update({ 
+        .update({
           status: 'REJEITADA',
           analyzed_by: profile?.id,
           analyzed_at: new Date().toISOString(),
@@ -762,7 +779,7 @@ export const Solicitacoes: React.FC = () => {
       }
       fetchData(false);
     } catch (err: any) {
-      alert(err.message || "Erro ao rejeitar.");
+      setInfoModal({ title: 'Erro', message: err.message || 'Erro ao rejeitar.', type: 'error' });
     }
   };
 
@@ -1505,14 +1522,29 @@ export const Solicitacoes: React.FC = () => {
         }}>
           <div className="blueprint card elev-md" style={{ width: '400px', padding: 'var(--space-6)', background: 'var(--color-surface)' }}>
             <h3 style={{ marginTop: 0, marginBottom: 'var(--space-4)' }}>{confirmAction.title}</h3>
-            <p style={{ color: 'var(--color-text)', marginBottom: 'var(--space-5)', lineHeight: 1.5 }}>
+            <p style={{ color: 'var(--color-text)', marginBottom: confirmAction.reason ? 'var(--space-3)' : 'var(--space-5)', lineHeight: 1.5 }}>
               {confirmAction.message}
             </p>
+            {confirmAction.reason && (
+              <div className="field" style={{ marginBottom: 'var(--space-5)' }}>
+                <label>{confirmAction.reason.label}</label>
+                <textarea
+                  className="input"
+                  rows={3}
+                  autoFocus
+                  value={confirmReasonValue}
+                  onChange={e => setConfirmReasonValue(e.target.value)}
+                  placeholder={confirmAction.reason.placeholder}
+                  maxLength={confirmAction.reason.maxLength}
+                />
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setConfirmAction(null)}>Cancelar</button>
-              <button 
-                className="btn btn-primary blueprint" 
-                onClick={confirmAction.onConfirm}
+              <button
+                className="btn btn-primary blueprint"
+                disabled={!!confirmAction.reason && confirmReasonValue.trim().length < (confirmAction.reason.minLength || 0)}
+                onClick={() => confirmAction.onConfirm(confirmReasonValue.trim())}
               >
                 <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
                 {confirmAction.confirmText || 'Confirmar'}
