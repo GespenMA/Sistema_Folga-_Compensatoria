@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
+import { diasRestantesAte, diffDiasCalendario, hojeNoBrasil } from '../../lib/date';
 import { useAuth } from '../../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { 
@@ -191,21 +192,21 @@ export const EstabelecimentoDashboard: React.FC = () => {
   const pctReservado = totalOrcado > 0 ? (totalReservado / totalOrcado) * 100 : 0;
   const pctDisponivel = totalOrcado > 0 ? (saldoDisponivel / totalOrcado) * 100 : 0;
 
-  // Dias do Ciclo Selecionado
+  // Dias do Ciclo Selecionado — em dias de calendário no horário de Brasília, não em
+  // diferença bruta de instantes (ver frontend/src/lib/date.ts: uma conta com `new Date()`/
+  // `Math.ceil` sobre milissegundos diverge ao longo do dia por causa do fuso horário e do
+  // arredondamento em dobro entre "dias passados" e "total de dias").
   let totalDias = 0;
-  let diasPassados = 0;
   let diasRestantes = 0;
   let pctCiclo = 0;
-  let dFim = new Date();
 
   if (activeCycle) {
-    const dInicio = new Date(activeCycle.data_inicio + 'T12:00:00Z');
-    dFim = new Date(activeCycle.data_fim + 'T12:00:00Z');
-    const dHoje = new Date();
-    totalDias = Math.ceil((dFim.getTime() - dInicio.getTime()) / (1000 * 3600 * 24));
-    diasPassados = Math.ceil((dHoje.getTime() - dInicio.getTime()) / (1000 * 3600 * 24));
-    diasRestantes = Math.max(0, totalDias - diasPassados);
-    pctCiclo = Math.min(100, Math.max(0, (diasPassados / totalDias) * 100));
+    totalDias = diffDiasCalendario(activeCycle.data_inicio, activeCycle.data_fim);
+    diasRestantes = diasRestantesAte(activeCycle.data_fim);
+    if (totalDias > 0) {
+      const diasPassados = diffDiasCalendario(activeCycle.data_inicio, hojeNoBrasil());
+      pctCiclo = Math.min(100, Math.max(0, (diasPassados / totalDias) * 100));
+    }
   }
 
   // Direitos

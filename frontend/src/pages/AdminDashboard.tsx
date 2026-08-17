@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fetchAll } from '../lib/supabase';
+import { diasRestantesAte, diffDiasCalendario, hojeNoBrasil } from '../lib/date';
 import {
   Wallet, FileText, Landmark, Building2, Calendar, Bell,
   Download, Eye,
@@ -181,29 +182,25 @@ export const AdminDashboard: React.FC = () => {
   const viewEstablishmentDetails = (unidade: any) => {
     navigate(`/admin/servidores?est_id=${unidade.id}`);
   };
-  const today = new Date();
-  
   const availableLocations = useMemo(() => {
     const locs = new Set(allEstablishments.map(e => e.localizacao).filter(Boolean));
     return Array.from(locs).sort();
   }, [allEstablishments]);
 
+  // Calculado em dias de calendário no horário de Brasília (não em diferença bruta de
+  // instantes) — ver frontend/src/lib/date.ts para o porquê: uma conta ingênua com
+  // `new Date()`/`new Date(dataFim)` diverge ao longo do dia por causa do fuso horário.
   const diasRestantes = useMemo(() => {
     if (!activeCycle) return 0;
-    const end = new Date(activeCycle.data_fim);
-    const diff = end.getTime() - today.getTime();
-    const days = Math.ceil(diff / (1000 * 3600 * 24));
-    return days < 0 ? 0 : days;
+    return diasRestantesAte(activeCycle.data_fim);
   }, [activeCycle]);
 
   const progressoCiclo = useMemo(() => {
     if (!activeCycle) return 0;
-    const start = new Date(activeCycle.data_inicio).getTime();
-    const end = new Date(activeCycle.data_fim).getTime();
-    const now = today.getTime();
-    if (now < start) return 0;
-    if (now > end) return 100;
-    return Math.round(((now - start) / (end - start)) * 100);
+    const totalDias = diffDiasCalendario(activeCycle.data_inicio, activeCycle.data_fim);
+    if (totalDias <= 0) return 100;
+    const diasPassados = diffDiasCalendario(activeCycle.data_inicio, hojeNoBrasil());
+    return Math.round(Math.min(100, Math.max(0, (diasPassados / totalDias) * 100)));
   }, [activeCycle]);
 
   const formatDateString = (dateStr: string) => {
