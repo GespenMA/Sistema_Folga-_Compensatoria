@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Search } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+
+const ITEMS_PER_PAGE = 20;
 
 // Remove caracteres com significado especial na sintaxe de filtro do PostgREST
 // (vírgula separa condições, ponto separa coluna.operador.valor, parênteses
@@ -36,6 +38,7 @@ type Employee = {
 export const Servidores: React.FC = () => {
   const { profile } = useAuth();
   const [servidores, setServidores] = useState<Employee[]>([]);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [positions, setPositions] = useState<Position[]>([]);
@@ -45,6 +48,14 @@ export const Servidores: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPos, setSelectedPos] = useState('');
   const [selectedCycleId, setSelectedCycleId] = useState('');
+
+  // Paginação
+  const [page, setPage] = useState(1);
+
+  // Volta pra primeira página sempre que um filtro muda
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, selectedPos, selectedCycleId]);
 
   // Busca única dos combos (Cargos e Ciclos)
   useEffect(() => {
@@ -87,6 +98,7 @@ export const Servidores: React.FC = () => {
         employeeIds = Array.from(new Set((shiftsData || []).map((s: any) => s.employee_id)));
         if (employeeIds.length === 0) {
           setServidores([]);
+          setTotalRecords(0);
           return;
         }
       }
@@ -96,7 +108,7 @@ export const Servidores: React.FC = () => {
         .select(`
           *,
           positions (id, nome, codigo)
-        `)
+        `, { count: 'exact' })
         .eq('establishment_id', profile.establishment_id)
         .order('nome');
 
@@ -111,15 +123,20 @@ export const Servidores: React.FC = () => {
         query = query.or(`nome.ilike.%${term}%,matricula.ilike.%${term}%`);
       }
 
-      const { data, error } = await query;
+      const from = (page - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+      query = query.range(from, to);
+
+      const { data, error, count } = await query;
       if (error) throw error;
       setServidores((data || []) as Employee[]);
+      setTotalRecords(count || 0);
     } catch (err) {
       console.error('Erro ao buscar servidores:', err);
     } finally {
       setLoading(false);
     }
-  }, [profile, selectedCycleId, selectedPos, searchTerm]);
+  }, [profile, selectedCycleId, selectedPos, searchTerm, page]);
 
   // Debounce para a busca por termo (mesmo padrão da Consulta Global de Servidores do Admin)
   useEffect(() => {
@@ -128,6 +145,8 @@ export const Servidores: React.FC = () => {
     }, 300);
     return () => clearTimeout(timer);
   }, [fetchServidores]);
+
+  const totalPages = Math.max(1, Math.ceil(totalRecords / ITEMS_PER_PAGE));
 
   return (
     <div>
@@ -231,6 +250,36 @@ export const Servidores: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Paginação */}
+        {totalRecords > 0 && (
+          <div style={{ padding: 'var(--space-4)', borderTop: '1px solid var(--color-divider)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
+              Mostrando {Math.min((page - 1) * ITEMS_PER_PAGE + 1, totalRecords)} a {Math.min(page * ITEMS_PER_PAGE, totalRecords)} de {totalRecords} registros
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className="btn btn-secondary"
+                disabled={page === 1}
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <ChevronLeft size={16} /> Anterior
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', fontSize: '14px', fontWeight: 600 }}>
+                {page} / {totalPages}
+              </div>
+              <button
+                className="btn btn-secondary"
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                Próxima <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
         )}
       </div>
