@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { roundCents } from '../../lib/money';
 
 type Cargo = {
   id: string;
@@ -151,7 +152,7 @@ export const Simulador: React.FC = () => {
 
   // Saldo real disponível para simular: teto planejado menos o que já está Aprovado ou
   // Aguardando Aprovação — evita que o simulador ofereça um poder de compra que não existe mais.
-  const disponivelReal = totalOrcado - totalComprometido;
+  const disponivelReal = roundCents(totalOrcado - totalComprometido);
 
   const saldoRestante = disponivelReal - custoTotalSimulado;
   const isEstourado = saldoRestante < 0;

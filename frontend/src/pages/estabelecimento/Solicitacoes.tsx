@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { roundCents } from '../../lib/money';
 
 type SortColumnSol = 'servidor' | 'tipo' | 'data_plantao' | 'valor' | 'status';
 type SortColumnUsufruida = 'servidor' | 'data_usufruto';
@@ -233,7 +234,7 @@ export const Solicitacoes: React.FC = () => {
         setTotalOrcado(orcado);
         setTotalGasto(consumido);
         setTotalEmpenhado(empenhado);
-        setOrcamentoDisponivel(orcado - consumido);
+        setOrcamentoDisponivel(roundCents(orcado - consumido));
       }
 
     } catch (err) {
@@ -786,7 +787,7 @@ export const Solicitacoes: React.FC = () => {
   // Disponível para CRIAR um novo pedido: desconta Aprovado + Aguardando Aprovação.
   // Diferente de orcamentoDisponivel (só desconta Aprovado), que é o número certo para
   // decidir se um pedido específico pode ser APROVADO agora.
-  const disponivelParaLancamento = totalOrcado - totalGasto - totalEmpenhado;
+  const disponivelParaLancamento = roundCents(totalOrcado - totalGasto - totalEmpenhado);
 
   const getStatusBadge = (status: string) => {
     switch (status) {

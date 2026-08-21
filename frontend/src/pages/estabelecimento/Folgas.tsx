@@ -2,6 +2,7 @@ import React, { useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { roundCents } from '../../lib/money';
 
 type Employee = {
   id: string;
@@ -46,7 +47,7 @@ export const Folgas: React.FC = () => {
   const [totalOrcado, setTotalOrcado] = useState(0);
   const [totalAprovado, setTotalAprovado] = useState(0);
   const [totalPendente, setTotalPendente] = useState(0);
-  const orcamentoDisponivel = totalOrcado - totalAprovado - totalPendente;
+  const orcamentoDisponivel = roundCents(totalOrcado - totalAprovado - totalPendente);
 
   // Filtros e busca
   const [busca, setBusca] = useState('');
@@ -168,7 +169,7 @@ export const Folgas: React.FC = () => {
       setTotalAprovado(aprovado);
       setTotalPendente(pendente);
 
-      return orcado - aprovado - pendente;
+      return roundCents(orcado - aprovado - pendente);
     } catch (err) {
       console.error(err);
       return orcamentoDisponivel;
