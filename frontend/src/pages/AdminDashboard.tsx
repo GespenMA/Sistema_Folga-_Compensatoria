@@ -6,7 +6,7 @@ import {
   Download, Eye,
   AlertTriangle, AlertCircle, Info, ArrowRight,
   ChevronUp, ChevronDown, ChevronsUpDown,
-  Users, Scale, Layers, TrendingUp
+  Users, Scale, Layers
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
@@ -595,6 +595,8 @@ export const AdminDashboard: React.FC = () => {
        saldoRestante: number;
        pctGasto: number;
        pctSaldo: number;
+       top20Sum: number;
+       top20Qtd: number;
      } | null = null;
 
      if (totalContextoServidores > 0 && baseOrcamento > 0 && sortedServidores.length > 0) {
@@ -786,8 +788,15 @@ export const AdminDashboard: React.FC = () => {
   };
 
   // Alertas
-  const alertas = useMemo(() => {
-    const list = [];
+  interface DashboardAlert {
+    type: string;
+    icon: React.ReactNode;
+    text: React.ReactNode;
+    action?: () => void;
+  }
+
+  const alertas = useMemo<DashboardAlert[]>(() => {
+    const list: DashboardAlert[] = [];
     const criticUnits = unidades.filter(u => u.consumoPct >= 80).length;
     if (criticUnits > 0) {
       list.push({ type: 'danger', icon: <AlertTriangle size={18} color="#dc2626" />, text: <><span style={{fontWeight:600}}>{criticUnits} unidades</span> consumiram mais de 80% do orçamento.</>, action: () => { setActiveTab('detalhamento'); setStatusFilter('Crítico'); document.getElementById('detalhamento-panel')?.scrollIntoView({ behavior: 'smooth' }); } });
@@ -1519,9 +1528,9 @@ export const AdminDashboard: React.FC = () => {
               <div 
                 key={idx} 
                 style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', cursor: alert.action ? 'pointer' : 'default', padding: '8px', borderRadius: '8px', transition: 'background-color 0.2s', marginLeft: '-8px', marginRight: '-8px' }}
-                onClick={alert.action}
-                onMouseEnter={(e) => alert.action && (e.currentTarget.style.backgroundColor = 'var(--color-neutral-100)')}
-                onMouseLeave={(e) => alert.action && (e.currentTarget.style.backgroundColor = 'transparent')}
+                onClick={() => { if (alert.action) alert.action(); }}
+                onMouseEnter={(e) => { if (alert.action) e.currentTarget.style.backgroundColor = 'var(--color-neutral-100)'; }}
+                onMouseLeave={(e) => { if (alert.action) e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
                 <div style={{ marginTop: '2px' }}>{alert.icon}</div>
                 <div style={{ fontSize: '13px', color: 'var(--color-text)' }}>
@@ -1904,7 +1913,7 @@ export const AdminDashboard: React.FC = () => {
           })()}
 
           {/* Tabela de Ranking por Unidade (Agrupado por Complexidade) */}
-          {Object.entries(sortedRankingUnidades).map(([comp, units]) => (
+          {Object.entries(sortedRankingUnidades as Record<string, any[]>).map(([comp, units]) => (
             <div key={comp} className="dashboard-card" style={{ background: '#fff' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
                 <h3 style={{ margin: 0, color: 'var(--color-text-base)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1924,7 +1933,7 @@ export const AdminDashboard: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {units.map((u, i) => (
+                    {(units as any[]).map((u: any) => (
                       <tr key={u.id}>
                         <td style={{ padding: '12px 16px' }}>{u.posGroup}º</td>
                         <td style={{ fontWeight: 600 }}>{u.nome}</td>
@@ -1945,16 +1954,16 @@ export const AdminDashboard: React.FC = () => {
                           Total ({units.length} unidades)
                         </td>
                         <td style={{ textAlign: 'center', color: '#0f172a' }}>
-                          {units.reduce((acc, u) => acc + u.qFolga, 0)}
+                          {(units as any[]).reduce((acc: number, u: any) => acc + u.qFolga, 0)}
                         </td>
                         <td style={{ textAlign: 'center', color: '#0f172a' }}>
-                          {units.reduce((acc, u) => acc + u.qPlus, 0)}
+                          {(units as any[]).reduce((acc: number, u: any) => acc + u.qPlus, 0)}
                         </td>
                         <td style={{ textAlign: 'center', color: '#3b82f6' }}>
-                          {units.reduce((acc, u) => acc + u.qTotal, 0)}
+                          {(units as any[]).reduce((acc: number, u: any) => acc + u.qTotal, 0)}
                         </td>
                         <td style={{ textAlign: 'right', color: '#0f172a' }}>
-                          {getFormatCurrency(units.reduce((acc, u) => acc + u.vTotal, 0))}
+                          {getFormatCurrency((units as any[]).reduce((acc: number, u: any) => acc + u.vTotal, 0))}
                         </td>
                       </tr>
                     </tfoot>
@@ -1986,7 +1995,7 @@ export const AdminDashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedRankingServidores.map((s, i) => (
+                  {sortedRankingServidores.map((s: any) => (
                     <tr key={s.id}>
                       <td style={{ padding: '12px 16px' }}>{s.pos}º</td>
                       <td>
@@ -2060,13 +2069,13 @@ export const AdminDashboard: React.FC = () => {
                       outerRadius={110}
                       paddingAngle={5}
                       dataKey="value"
-                      label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                      label={({ percent }) => `${((percent || 0) * 100).toFixed(0)}%`}
                       labelLine={false}
                     >
                       <Cell key="cell-0" fill="#3b82f6" />
                       <Cell key="cell-1" fill="#10b981" />
                     </Pie>
-                    <RechartsTooltip formatter={(val: number) => getFormatCurrency(val)} />
+                    <RechartsTooltip formatter={(val: any) => getFormatCurrency(Number(val || 0))} />
                     <Legend verticalAlign="bottom" height={36} />
                   </PieChart>
                 </ResponsiveContainer>
@@ -2086,7 +2095,7 @@ export const AdminDashboard: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" tickFormatter={(v) => getFormatCurrency(v).replace('R$', '').trim()} />
                     <YAxis dataKey="nome" type="category" width={180} tick={{ fontSize: 11, fill: '#475569' }} />
-                    <RechartsTooltip formatter={(val: number) => getFormatCurrency(val)} />
+                    <RechartsTooltip formatter={(val: any) => getFormatCurrency(Number(val || 0))} />
                     <Legend verticalAlign="bottom" height={36} />
                     <Bar dataKey="vFolga" name="Folga Compensatória (R$)" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} />
                     <Bar dataKey="vPlus" name="Plantão Plus (R$)" stackId="a" fill="#10b981" radius={[0, 4, 4, 0]} />

@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import { 
   Calendar, DollarSign, Users, FileText, CheckCircle, AlertCircle, Clock, ArrowRight,
   TrendingUp, Activity, BadgeAlert, Calculator, UserPlus, FilePlus,
-  ChevronUp, ChevronDown, ChevronsUpDown, Award, AlertTriangle,
+  ChevronUp, ChevronDown, ChevronsUpDown,
   Wallet, Scale, Layers, Info
 } from 'lucide-react';
 import {
@@ -308,6 +308,8 @@ export const EstabelecimentoDashboard: React.FC = () => {
       saldoRestante: number;
       pctGasto: number;
       pctSaldo: number;
+      top20Sum: number;
+      top20Qtd: number;
     } | null = null;
 
     if (totalUnitEmployees > 0 && baseOrcamento > 0 && sortedServidores.length > 0) {
@@ -1250,13 +1252,13 @@ export const EstabelecimentoDashboard: React.FC = () => {
                           outerRadius={110}
                           paddingAngle={5}
                           dataKey="value"
-                          label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                          label={({ percent }) => `${((percent || 0) * 100).toFixed(0)}%`}
                           labelLine={false}
                         >
                           <Cell key="cell-0" fill="#3b82f6" />
                           <Cell key="cell-1" fill="#10b981" />
                         </Pie>
-                        <RechartsTooltip formatter={(val: number) => formatCurrency(val)} />
+                        <RechartsTooltip formatter={(val: any) => formatCurrency(Number(val || 0))} />
                         <Legend verticalAlign="bottom" height={36} />
                       </PieChart>
                     </ResponsiveContainer>
@@ -1276,7 +1278,7 @@ export const EstabelecimentoDashboard: React.FC = () => {
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                         <XAxis type="number" tickFormatter={(v) => formatCurrency(v).replace('R$', '').trim()} />
                         <YAxis dataKey="nome" type="category" width={160} tick={{ fontSize: 11, fill: '#475569' }} />
-                        <RechartsTooltip formatter={(val: number) => formatCurrency(val)} />
+                        <RechartsTooltip formatter={(val: any) => formatCurrency(Number(val || 0))} />
                         <Legend verticalAlign="bottom" height={36} />
                         <Bar dataKey="vFolga" name="Folga Compensatória (R$)" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} />
                         <Bar dataKey="vPlus" name="Plantão Plus (R$)" stackId="a" fill="#10b981" radius={[0, 4, 4, 0]} />

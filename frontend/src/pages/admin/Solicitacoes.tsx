@@ -522,7 +522,7 @@ export const Solicitacoes: React.FC = () => {
               </div>
               <div className="ui-modal__title">
                 <h3 className="ui-modal__title-text">Rejeitar Solicitação</h3>
-                <p className="ui-modal__title-sub">Você está rejeitando a solicitação de {rejectRequest.servidor_nome}.</p>
+                <p className="ui-modal__title-sub">Você está rejeitando a solicitação de {rejectRequest.employees?.nome || 'Servidor'}.</p>
               </div>
               <button className="ui-modal__close" onClick={() => setRejectModalOpen(false)}>
                 <XCircle size={20} />
