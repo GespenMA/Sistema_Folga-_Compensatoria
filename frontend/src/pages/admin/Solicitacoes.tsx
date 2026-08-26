@@ -440,8 +440,17 @@ export const Solicitacoes: React.FC = () => {
                         "{req.justificativa}"
                       </div>
                       {req.status === 'REJEITADA' && req.rejection_reason && (
-                        <div style={{ color: '#ef4444', fontSize: '11px', marginTop: '8px', fontWeight: 500 }}>
-                          <strong>Motivo da Rejeição:</strong> {req.rejection_reason}
+                        <div style={{ 
+                          color: req.rejection_reason.includes('encerramento do ciclo') ? '#9a3412' : '#991b1b', 
+                          fontSize: '11px', 
+                          marginTop: '8px', 
+                          fontWeight: 500,
+                          background: req.rejection_reason.includes('encerramento do ciclo') ? '#fff7ed' : '#fef2f2',
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          border: `1px solid ${req.rejection_reason.includes('encerramento do ciclo') ? '#fed7aa' : '#fee2e2'}`
+                        }}>
+                          <strong>Motivo:</strong> {req.rejection_reason}
                         </div>
                       )}
                     </td>
@@ -475,18 +484,86 @@ export const Solicitacoes: React.FC = () => {
                             <XCircle size={20} />
                           </button>
                         </div>
-                      ) : (
-                        <span style={{ 
-                          padding: '6px 12px', 
-                          borderRadius: '20px', 
-                          fontSize: '11px', 
-                          fontWeight: 700, 
-                          color: req.status === 'APROVADA' ? '#065f46' : (req.status === 'REJEITADA' ? '#991b1b' : '#475569'),
-                          background: req.status === 'APROVADA' ? '#d1fae5' : (req.status === 'REJEITADA' ? '#fee2e2' : '#e2e8f0') 
-                        }}>
-                          {req.status}
-                        </span>
-                      )}
+                      ) : (() => {
+                        const isAutoReject = req.status === 'REJEITADA' && req.rejection_reason?.includes('encerramento do ciclo');
+                        if (isAutoReject) {
+                          return (
+                            <span 
+                              style={{ 
+                                padding: '4px 10px', 
+                                borderRadius: '20px', 
+                                fontSize: '11px', 
+                                fontWeight: 700, 
+                                color: '#9a3412', 
+                                background: '#ffedd5', 
+                                border: '1px solid #fed7aa',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                whiteSpace: 'nowrap'
+                              }}
+                              title="Rejeitada automaticamente por encerramento do ciclo"
+                            >
+                              <Clock size={12} /> EXPIRADA (CICLO)
+                            </span>
+                          );
+                        }
+                        if (req.status === 'REJEITADA') {
+                          return (
+                            <span 
+                              style={{ 
+                                padding: '4px 10px', 
+                                borderRadius: '20px', 
+                                fontSize: '11px', 
+                                fontWeight: 700, 
+                                color: '#991b1b', 
+                                background: '#fee2e2', 
+                                border: '1px solid #fecaca',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              <XCircle size={12} /> REJEITADA
+                            </span>
+                          );
+                        }
+                        if (req.status === 'APROVADA') {
+                          return (
+                            <span 
+                              style={{ 
+                                padding: '4px 10px', 
+                                borderRadius: '20px', 
+                                fontSize: '11px', 
+                                fontWeight: 700, 
+                                color: '#065f46', 
+                                background: '#d1fae5', 
+                                border: '1px solid #a7f3d0',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              <CheckCircle size={12} /> APROVADA
+                            </span>
+                          );
+                        }
+                        return (
+                          <span style={{ 
+                            padding: '4px 10px', 
+                            borderRadius: '20px', 
+                            fontSize: '11px', 
+                            fontWeight: 700, 
+                            color: '#475569',
+                            background: '#e2e8f0',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {req.status}
+                          </span>
+                        );
+                      })()}
                     </td>
 
                   </tr>

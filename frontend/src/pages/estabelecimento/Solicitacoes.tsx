@@ -29,6 +29,7 @@ type Solicitacao = {
   justificativa: string;
   requested_at: string;
   tipo_solicitacao: string;
+  rejection_reason?: string | null;
   data_plantao?: string;
   compensatory_days?: {
     periodo_inicio: string;
@@ -195,7 +196,7 @@ export const Solicitacoes: React.FC = () => {
         const { data: sols } = await supabase
           .from('purchase_requests')
           .select(`
-            id, valor, status, justificativa, requested_at, tipo_solicitacao, data_plantao, position_id,
+            id, valor, status, justificativa, requested_at, tipo_solicitacao, data_plantao, position_id, rejection_reason,
             compensatory_days (periodo_inicio, periodo_fim, quantidade_plantoes),
             employees (nome, matricula, positions(nome, codigo))
           `)
@@ -789,11 +790,16 @@ export const Solicitacoes: React.FC = () => {
   // decidir se um pedido específico pode ser APROVADO agora.
   const disponivelParaLancamento = roundCents(totalOrcado - totalGasto - totalEmpenhado);
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, reason?: string | null) => {
     switch (status) {
       case 'SOLICITADA': return <span className="tag" style={{ background: '#d97706', color: 'white' }}>AGUARDANDO APROVAÇÃO</span>;
       case 'APROVADA': return <span className="tag" style={{ background: '#059669', color: 'white' }}>APROVADA (INDENIZADA)</span>;
-      case 'REJEITADA': return <span className="tag" style={{ background: '#dc2626', color: 'white' }}>REJEITADA</span>;
+      case 'REJEITADA': {
+        if (reason?.includes('encerramento do ciclo')) {
+          return <span className="tag" style={{ background: '#ea580c', color: 'white' }} title="Rejeitada automaticamente por encerramento do ciclo">EXPIRADA (CICLO)</span>;
+        }
+        return <span className="tag" style={{ background: '#dc2626', color: 'white' }}>REJEITADA</span>;
+      }
       default: return <span className="tag">{status}</span>;
     }
   };
@@ -1254,7 +1260,7 @@ export const Solicitacoes: React.FC = () => {
                       {sol.data_plantao ? new Date(sol.data_plantao + 'T12:00:00Z').toLocaleDateString('pt-BR') : '—'}
                     </td>
                     <td data-label="Valor" style={{ padding: 'var(--space-3)', fontWeight: 600 }}>R$ {Number(sol.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
-                    <td data-label="Status" style={{ padding: 'var(--space-3)' }}>{getStatusBadge(sol.status)}</td>
+                    <td data-label="Status" style={{ padding: 'var(--space-3)' }}>{getStatusBadge(sol.status, sol.rejection_reason)}</td>
                     <td data-label="Ações" style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
                         {sol.status === 'SOLICITADA' && (
