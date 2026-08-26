@@ -24,3 +24,15 @@ export function diffDiasCalendario(dataInicioStr: string, dataFimStr: string): n
 export function diasRestantesAte(dataFimStr: string): number {
   return Math.max(0, diffDiasCalendario(hojeNoBrasil(), dataFimStr));
 }
+
+// Tempo restante (horas e minutos) até as 23:59:59 da data-limite (YYYY-MM-DD) no horário de Brasília (UTC-3).
+export function tempoRestanteAte(dataFimStr: string): { horas: number, minutos: number } {
+  const fim = new Date(`${dataFimStr}T23:59:59-03:00`).getTime();
+  const agora = new Date().getTime();
+  const diffMs = Math.max(0, fim - agora);
+  
+  const horas = Math.floor(diffMs / (1000 * 60 * 60));
+  const minutos = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+  
+  return { horas, minutos };
+}

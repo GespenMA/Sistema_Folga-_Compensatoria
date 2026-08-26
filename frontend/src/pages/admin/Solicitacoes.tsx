@@ -51,6 +51,10 @@ export const Solicitacoes: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectRequest, setRejectRequest] = useState<PurchaseRequest | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+
   // Custom Dropdown State for Estabelecimento Penal
   const [isEstDropdownOpen, setIsEstDropdownOpen] = useState(false);
   const [estSearch, setEstSearch] = useState('');
@@ -170,45 +174,50 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
-  const handleReject = async (req: PurchaseRequest) => {
-    const reason = window.prompt('Informe o motivo da rejeição (obrigatório):');
-    if (reason === null) return; // cancelou
-    if (reason.trim().length < 5) {
+  const openRejectModal = (req: PurchaseRequest) => {
+    setRejectRequest(req);
+    setRejectReason('');
+    setRejectModalOpen(true);
+  };
+
+  const confirmReject = async () => {
+    if (!rejectRequest) return;
+    if (rejectReason.trim().length < 5) {
       alert('Por favor, informe um motivo válido para a rejeição.');
       return;
     }
 
-    setProcessingId(req.id);
+    setProcessingId(rejectRequest.id);
+    setRejectModalOpen(false);
+
     try {
-      // Atualiza a solicitação
       const { error: reqErr } = await supabase
         .from('purchase_requests')
         .update({
           status: 'REJEITADA',
-          rejection_reason: reason.trim(),
+          rejection_reason: rejectReason.trim(),
           analyzed_by: profile!.id,
           analyzed_at: new Date().toISOString()
         })
-        .eq('id', req.id);
+        .eq('id', rejectRequest.id);
         
       if (reqErr) throw reqErr;
 
-      // Se for folga, libera o dia gerado
-      if (req.compensatory_day_id) {
+      if (rejectRequest.compensatory_day_id) {
         const { error: compErr } = await supabase
           .from('compensatory_days')
           .update({ status: 'GERADA' })
-          .eq('id', req.compensatory_day_id);
+          .eq('id', rejectRequest.compensatory_day_id);
         if (compErr) throw compErr;
       }
 
-      // Atualiza lista localmente
-      setRequests(requests.map(r => r.id === req.id ? { ...r, status: 'REJEITADA', rejection_reason: reason.trim() } : r));
+      setRequests(requests.map(r => r.id === rejectRequest.id ? { ...r, status: 'REJEITADA', rejection_reason: rejectReason.trim() } : r));
 
     } catch (e: any) {
       alert('Erro ao rejeitar: ' + e.message);
     } finally {
       setProcessingId(null);
+      setRejectRequest(null);
     }
   };
 
@@ -245,6 +254,8 @@ export const Solicitacoes: React.FC = () => {
 
   const totalPages = Math.ceil(filteredRequests.length / ITEMS_PER_PAGE);
   const paginatedRequests = filteredRequests.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  const isClosedCycle = cycles.find(c => c.id === selectedCycle)?.status === 'FECHADO';
 
   return (
     <div style={{ width: '100%' }}>
@@ -440,7 +451,7 @@ export const Solicitacoes: React.FC = () => {
                     </td>
                     
                     <td style={{ padding: '16px', textAlign: 'center' }}>
-                      {req.status === 'SOLICITADA' ? (
+                      {req.status === 'SOLICITADA' && !isClosedCycle ? (
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
                           <button 
                             onClick={() => handleApprove(req)}
@@ -454,7 +465,7 @@ export const Solicitacoes: React.FC = () => {
                           </button>
                           
                           <button 
-                            onClick={() => handleReject(req)}
+                            onClick={() => openRejectModal(req)}
                             disabled={processingId === req.id}
                             title="Rejeitar Solicitação"
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '8px', border: 'none', background: '#fef2f2', color: '#ef4444', cursor: processingId === req.id ? 'not-allowed' : 'pointer', transition: 'all 0.2s', opacity: processingId === req.id ? 0.5 : 1 }}
@@ -501,6 +512,47 @@ export const Solicitacoes: React.FC = () => {
           </div>
         )}
       </div>
+
+      {rejectModalOpen && rejectRequest && (
+        <div className="ui-modal-backdrop" onClick={() => setRejectModalOpen(false)}>
+          <div className="ui-modal ui-modal--sm" onClick={e => e.stopPropagation()}>
+            <div className="ui-modal__header">
+              <div className="ui-modal__icon ui-modal--danger">
+                <XCircle size={24} />
+              </div>
+              <div className="ui-modal__title">
+                <h3 className="ui-modal__title-text">Rejeitar Solicitação</h3>
+                <p className="ui-modal__title-sub">Você está rejeitando a solicitação de {rejectRequest.servidor_nome}.</p>
+              </div>
+              <button className="ui-modal__close" onClick={() => setRejectModalOpen(false)}>
+                <XCircle size={20} />
+              </button>
+            </div>
+            
+            <div className="ui-modal__body">
+              <div className="form-group" style={{ marginTop: '16px' }}>
+                <label className="form-label" htmlFor="reject-reason">Motivo da Rejeição</label>
+                <textarea
+                  id="reject-reason"
+                  className="input"
+                  style={{ minHeight: '100px', resize: 'vertical' }}
+                  placeholder="Descreva o motivo (obrigatório, mínimo de 5 caracteres)..."
+                  value={rejectReason}
+                  onChange={e => setRejectReason(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="ui-modal__actions">
+              <button className="btn btn-ghost" onClick={() => setRejectModalOpen(false)}>Cancelar</button>
+              <button className="btn btn-danger" onClick={confirmReject} disabled={rejectReason.trim().length < 5}>
+                Confirmar Rejeição
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

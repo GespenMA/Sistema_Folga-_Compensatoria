@@ -1,33 +1,56 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, fetchAll } from '../lib/supabase';
-import { diasRestantesAte, diffDiasCalendario, hojeNoBrasil } from '../lib/date';
+import { diasRestantesAte, tempoRestanteAte, diffDiasCalendario, hojeNoBrasil } from '../lib/date';
 import {
   Wallet, FileText, Landmark, Building2, Calendar, Bell,
   Download, Eye,
   AlertTriangle, AlertCircle, Info, ArrowRight,
-  ChevronUp, ChevronDown, ChevronsUpDown
+  ChevronUp, ChevronDown, ChevronsUpDown,
+  Users, Scale, Layers, TrendingUp
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell
+  PieChart, Pie, Cell, BarChart, Bar
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 
-type DashboardTab = 'dashboard' | 'detalhamento';
-type UnitStatusFilter = 'Todos' | 'Normal' | 'Atenção' | 'Crítico';
+type DashboardTab = 'dashboard' | 'detalhamento' | 'ranking';
+type UnitStatusFilter = 'Todos' | 'Normal' | 'Atenção' | 'Crítico' | 'Sem Solicitações';
 type LocationFilter = string;
 type UnidadeSortColumn = 'nome' | 'loc' | 'orcamento' | 'consumoPct' | 'gasto' | 'saldo' | 'pendentes' | 'aprovadas' | 'rejeitadas' | 'valorAprov' | 'status';
+type RankSortColumn = 'nome' | 'cargo' | 'estabelecimento' | 'qFolga' | 'qPlus' | 'qTotal' | 'vTotal';
 type SortDirection = 'asc' | 'desc';
+
+// Cache em memória na sessão para carregamento instantâneo (SWR)
+interface DashboardMemoryCache {
+  cycles?: any[];
+  establishments?: any[];
+  establishmentsCount?: { total: number; breakdown: Record<string, number> };
+  positions?: any[];
+  pvMap?: Record<string, number>;
+  totalEmployees?: number;
+  employeeCountByEst?: Record<string, number>;
+  activeCycle?: any;
+  selectedCycleId?: string;
+  cycleData?: Record<string, {
+    requests: any[];
+    cycleEstablishments: any[];
+  }>;
+}
+
+const dashboardMemoryCache: DashboardMemoryCache = {};
 
 export const AdminDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !dashboardMemoryCache.cycles?.length);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [activeCycle, setActiveCycle] = useState<any>(null);
-  const [cycles, setCycles] = useState<any[]>([]);
-  const [selectedCycleId, setSelectedCycleId] = useState<string>('');
-  const [establishmentsCount, setEstablishmentsCount] = useState({ total: 0, capital: 0, interior: 0 });
+  const [activeCycle, setActiveCycle] = useState<any>(() => dashboardMemoryCache.activeCycle || null);
+  const [cycles, setCycles] = useState<any[]>(() => dashboardMemoryCache.cycles || []);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>(() => dashboardMemoryCache.selectedCycleId || '');
+  const [establishmentsCount, setEstablishmentsCount] = useState<{ total: number; breakdown: Record<string, number> }>(
+    () => dashboardMemoryCache.establishmentsCount || { total: 0, breakdown: {} }
+  );
   const [activeTab, setActiveTab] = useState<DashboardTab>('dashboard');
   const [globalSelectedUnits, setGlobalSelectedUnits] = useState<string[]>([]);
   const [globalLocations, setGlobalLocations] = useState<string[]>([]);
@@ -39,121 +62,204 @@ export const AdminDashboard: React.FC = () => {
   const [locationFilter, setLocationFilter] = useState<LocationFilter>('Todos');
   const [sortColumn, setSortColumn] = useState<UnidadeSortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const tabRefs = useRef<Record<DashboardTab, HTMLButtonElement | null>>({ dashboard: null, detalhamento: null });
+  
+  const [rankUniSortCol, setRankUniSortCol] = useState<RankSortColumn | null>(null);
+  const [rankUniSortDir, setRankUniSortDir] = useState<SortDirection>('desc');
+  
+  const [rankServSortCol, setRankServSortCol] = useState<RankSortColumn | null>(null);
+  const [rankServSortDir, setRankServSortDir] = useState<SortDirection>('desc');
+  const tabRefs = useRef<Record<DashboardTab, HTMLButtonElement | null>>({ dashboard: null, detalhamento: null, ranking: null });
   const dropdownRef = useRef<HTMLDivElement>(null);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
   
-  // Data lists
-  const [requests, setRequests] = useState<any[]>([]);
-  const [cycleEstablishments, setCycleEstablishments] = useState<any[]>([]);
-  const [allEstablishments, setAllEstablishments] = useState<any[]>([]);
-  const [positions, setPositions] = useState<any[]>([]);
+  // Data lists inicializadas com cache se disponível
+  const [requests, setRequests] = useState<any[]>(() => {
+    const cId = dashboardMemoryCache.selectedCycleId;
+    return (cId && dashboardMemoryCache.cycleData?.[cId]?.requests) || [];
+  });
+  const [cycleEstablishments, setCycleEstablishments] = useState<any[]>(() => {
+    const cId = dashboardMemoryCache.selectedCycleId;
+    return (cId && dashboardMemoryCache.cycleData?.[cId]?.cycleEstablishments) || [];
+  });
+  const [allEstablishments, setAllEstablishments] = useState<any[]>(() => dashboardMemoryCache.establishments || []);
+  const [positions, setPositions] = useState<any[]>(() => dashboardMemoryCache.positions || []);
+  const [totalEmployees, setTotalEmployees] = useState<number>(() => dashboardMemoryCache.totalEmployees || 0);
+  const [employeeCountByEst, setEmployeeCountByEst] = useState<Record<string, number>>(() => dashboardMemoryCache.employeeCountByEst || {});
 
-
-
-  const fetchData = useCallback(async (targetCycleId?: string) => {
-    setLoading(true);
+  const fetchData = useCallback(async (targetCycleId?: string, forceRefresh = false) => {
+    const hasCache = !!dashboardMemoryCache.cycles?.length;
+    if (!hasCache) {
+      setLoading(true);
+    }
     setErrorMessage(null);
+
     try {
-        // 1. Carrega todos os ciclos
-        const { data: cyclesList, error: cyclesError } = await supabase
-          .from('cycles')
-          .select('*')
-          .order('ano', { ascending: false })
-          .order('mes', { ascending: false });
-        if (cyclesError) throw cyclesError;
+      // 1. Execução paralela de dados estruturais e lista de ciclos
+      const cyclesPromise = supabase
+        .from('cycles')
+        .select('*')
+        .order('ano', { ascending: false })
+        .order('mes', { ascending: false });
 
-        const list = cyclesList || [];
-        setCycles(list);
+      const estsPromise = (!dashboardMemoryCache.establishments || forceRefresh)
+        ? supabase.from('establishments').select('id, nome, localizacao, ativo').eq('ativo', true)
+        : Promise.resolve({ data: dashboardMemoryCache.establishments, error: null });
 
-        let ciclo = null;
-        const cId = targetCycleId || selectedCycleId;
+      const posPromise = (!dashboardMemoryCache.positions || forceRefresh)
+        ? supabase.from('positions').select('id, nome, codigo')
+        : Promise.resolve({ data: dashboardMemoryCache.positions, error: null });
 
-        if (list.length > 0) {
-          if (cId) {
-            ciclo = list.find(c => c.id === cId);
-          }
-          if (!ciclo) {
-            // Tenta achar o ciclo Aberto ou Reaberto mais recente, senão o primeiro da lista
-            ciclo = list.find(c => c.status === 'ABERTO' || c.status === 'REABERTO') || list[0];
-          }
-        }
+      const pvsPromise = (!dashboardMemoryCache.pvMap || forceRefresh)
+        ? supabase.from('position_values').select('valor, positions(codigo)').is('vigencia_fim', null)
+        : Promise.resolve({ data: null, error: null });
 
-        setActiveCycle(ciclo);
-        setSelectedCycleId(ciclo ? ciclo.id : '');
+      const empCountPromise = (dashboardMemoryCache.totalEmployees === undefined || forceRefresh)
+        ? supabase.from('employees').select('id', { count: 'exact', head: true })
+        : Promise.resolve({ count: dashboardMemoryCache.totalEmployees, error: null });
 
-        // 2. Estabelecimentos
-        const { data: ests, error: establishmentsError } = await supabase
-          .from('establishments')
-          .select('id, nome, localizacao, ativo')
-          .eq('ativo', true);
-        if (establishmentsError) throw establishmentsError;
+      const empByEstPromise = (!dashboardMemoryCache.employeeCountByEst || forceRefresh)
+        ? fetchAll(supabase.from('employees').select('establishment_id'))
+        : Promise.resolve(null);
 
-        if (ests) {
-          setAllEstablishments(ests);
-          const cap = ests.filter(e => e.localizacao?.toLowerCase() === 'capital').length;
-          setEstablishmentsCount({
-            total: ests.length,
-            capital: cap,
-            interior: ests.length - cap
-          });
-        }
+      // Dispara todas as consultas simultaneamente
+      const [
+        { data: cyclesList, error: cyclesError },
+        { data: ests, error: establishmentsError },
+        { data: pos, error: positionsError },
+        { data: pvs },
+        empCountRes,
+        empCountsRaw
+      ] = await Promise.all([
+        cyclesPromise,
+        estsPromise,
+        posPromise,
+        pvsPromise,
+        empCountPromise,
+        empByEstPromise
+      ]);
 
-        if (ciclo) {
-          // 3. Solicitações de compra do ciclo. Paginado: o ciclo pode ter mais de
-          // 1000 solicitações, e o Supabase corta silenciosamente sem o .range().
-          const reqsQuery = supabase
-            .from('purchase_requests')
-            .select(`
-              id, valor, status, requested_at, establishment_id, position_id, tipo_solicitacao
-            `)
-            .eq('cycle_id', ciclo.id);
-          const reqs = await fetchAll(reqsQuery);
-          setRequests(reqs);
+      if (cyclesError) throw cyclesError;
+      if (establishmentsError) throw establishmentsError;
+      if (positionsError) throw positionsError;
 
-          // 4. Orçamentos por estabelecimento e Recálculo em tempo real
-          const { data: pvs } = await supabase.from('position_values').select('valor, positions(codigo)').is('vigencia_fim', null);
-          const pvMap: Record<string, number> = {};
-          if (pvs) {
-            pvs.forEach((p: any) => { if (p.positions?.codigo) pvMap[p.positions.codigo] = Number(p.valor); });
-          }
+      const list = cyclesList || [];
+      dashboardMemoryCache.cycles = list;
+      setCycles(list);
 
-          const { data: cEsts, error: cycleEstablishmentsError } = await supabase
-            .from('cycle_establishments')
-            .select('establishment_id, total_orcado, establishments(nome, localizacao), planning_limits(quantidade_planejada, positions(codigo))')
-            .eq('cycle_id', ciclo.id);
-          
-          if (cycleEstablishmentsError) throw cycleEstablishmentsError;
-          if (cEsts) {
-            const recalced = cEsts.map((ce: any) => {
-              if (ce.planning_limits && ce.planning_limits.length > 0) {
-                let calc = 0;
-                ce.planning_limits.forEach((pl: any) => {
-                  const code = pl.positions?.codigo;
-                  calc += (pl.quantidade_planejada || 0) * (pvMap[code] || 0);
-                });
-                if (calc > 0) ce.total_orcado = calc;
-              }
-              return ce;
-            });
-            setCycleEstablishments(recalced);
-          }
-
-          // 5. Cargos para o gráfico de pizza
-          const { data: pos, error: positionsError } = await supabase.from('positions').select('id, nome, codigo');
-          if (positionsError) throw positionsError;
-          if (pos) setPositions(pos);
-        } else {
-          setRequests([]);
-          setCycleEstablishments([]);
-          setPositions([]);
-        }
-      } catch (err) {
-        console.error("Erro ao buscar dados do dashboard:", err);
-        setErrorMessage('Não foi possível carregar os dados do dashboard. Tente novamente.');
-      } finally {
-        setLoading(false);
+      if (ests) {
+        dashboardMemoryCache.establishments = ests;
+        setAllEstablishments(ests);
+        const breakdown: Record<string, number> = {};
+        ests.forEach((e: any) => {
+          const loc = e.localizacao || 'Interior';
+          breakdown[loc] = (breakdown[loc] || 0) + 1;
+        });
+        const estObj = { total: ests.length, breakdown };
+        dashboardMemoryCache.establishmentsCount = estObj;
+        setEstablishmentsCount(estObj);
       }
+
+      if (pos) {
+        dashboardMemoryCache.positions = pos;
+        setPositions(pos);
+      }
+
+      let pvMap = dashboardMemoryCache.pvMap;
+      if (pvs) {
+        pvMap = {};
+        pvs.forEach((p: any) => { if (p.positions?.codigo) pvMap![p.positions.codigo] = Number(p.valor); });
+        dashboardMemoryCache.pvMap = pvMap;
+      }
+
+      if (empCountRes?.count !== undefined && empCountRes.count !== null) {
+        dashboardMemoryCache.totalEmployees = empCountRes.count;
+        setTotalEmployees(empCountRes.count);
+      }
+
+      if (empCountsRaw) {
+        const countMap: Record<string, number> = {};
+        empCountsRaw.forEach((e: any) => {
+          if (e.establishment_id) countMap[e.establishment_id] = (countMap[e.establishment_id] || 0) + 1;
+        });
+        dashboardMemoryCache.employeeCountByEst = countMap;
+        setEmployeeCountByEst(countMap);
+      }
+
+      // 2. Determina o ciclo ativo
+      let ciclo = null;
+      const cId = targetCycleId || selectedCycleId || dashboardMemoryCache.selectedCycleId;
+      if (list.length > 0) {
+        if (cId) {
+          ciclo = list.find(c => c.id === cId);
+        }
+        if (!ciclo) {
+          ciclo = list.find(c => c.status === 'ABERTO' || c.status === 'REABERTO') || list[0];
+        }
+      }
+
+      dashboardMemoryCache.activeCycle = ciclo;
+      dashboardMemoryCache.selectedCycleId = ciclo ? ciclo.id : '';
+      setActiveCycle(ciclo);
+      setSelectedCycleId(ciclo ? ciclo.id : '');
+
+      if (ciclo) {
+        // 3. Consultas operacionais do ciclo em paralelo
+        const reqsQuery = supabase
+          .from('purchase_requests')
+          .select(`
+            id, valor, status, requested_at, establishment_id, position_id, employee_id, tipo_solicitacao,
+            employees(nome),
+            positions(nome),
+            establishments(nome, localizacao, complexidade)
+          `)
+          .eq('cycle_id', ciclo.id);
+
+        const cycleEstsQuery = supabase
+          .from('cycle_establishments')
+          .select('establishment_id, total_orcado, establishments(nome, localizacao), planning_limits(quantidade_planejada, positions(codigo))')
+          .eq('cycle_id', ciclo.id);
+
+        const [reqs, { data: cEsts, error: cycleEstablishmentsError }] = await Promise.all([
+          fetchAll(reqsQuery),
+          cycleEstsQuery
+        ]);
+
+        if (cycleEstablishmentsError) throw cycleEstablishmentsError;
+
+        setRequests(reqs);
+
+        let recalced: any[] = [];
+        if (cEsts) {
+          const currentPvMap = pvMap || dashboardMemoryCache.pvMap || {};
+          recalced = cEsts.map((ce: any) => {
+            if (ce.planning_limits && ce.planning_limits.length > 0) {
+              let calc = 0;
+              ce.planning_limits.forEach((pl: any) => {
+                const code = pl.positions?.codigo;
+                calc += (pl.quantidade_planejada || 0) * (currentPvMap[code] || 0);
+              });
+              if (calc > 0) ce.total_orcado = calc;
+            }
+            return ce;
+          });
+          setCycleEstablishments(recalced);
+        }
+
+        if (!dashboardMemoryCache.cycleData) dashboardMemoryCache.cycleData = {};
+        dashboardMemoryCache.cycleData[ciclo.id] = {
+          requests: reqs,
+          cycleEstablishments: recalced
+        };
+      } else {
+        setRequests([]);
+        setCycleEstablishments([]);
+      }
+    } catch (err) {
+      console.error("Erro ao buscar dados do dashboard:", err);
+      setErrorMessage('Não foi possível carregar os dados do dashboard. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   }, [selectedCycleId]);
 
   useEffect(() => {
@@ -193,6 +299,11 @@ export const AdminDashboard: React.FC = () => {
   const diasRestantes = useMemo(() => {
     if (!activeCycle) return 0;
     return diasRestantesAte(activeCycle.data_fim);
+  }, [activeCycle]);
+
+  const tempoRestante = useMemo(() => {
+    if (!activeCycle) return { horas: 0, minutos: 0 };
+    return tempoRestanteAte(activeCycle.data_fim);
   }, [activeCycle]);
 
   const progressoCiclo = useMemo(() => {
@@ -254,7 +365,19 @@ export const AdminDashboard: React.FC = () => {
     }
     return result;
   }, [filteredRequests]);
-  const folgasCompradasCount = useMemo(() => filteredRequests.filter(r => r.status === 'APROVADA').length, [filteredRequests]);
+  const folgasCompradasStats = useMemo(() => {
+    const aprovadas = filteredRequests.filter(r => r.status === 'APROVADA');
+    const total = aprovadas.length;
+    const folgaCount = aprovadas.filter(r => r.tipo_solicitacao === 'FOLGA_COMPENSATORIA').length;
+    const plusCount = aprovadas.filter(r => r.tipo_solicitacao === 'PLANTAO_PLUS').length;
+    return {
+      total,
+      folgaCount,
+      plusCount,
+      folgaPct: total > 0 ? ((folgaCount / total) * 100).toFixed(0) : '0',
+      plusPct: total > 0 ? ((plusCount / total) * 100).toFixed(0) : '0'
+    };
+  }, [filteredRequests]);
   const pendentesCount = useMemo(() => filteredRequests.filter(r => r.status === 'SOLICITADA').length, [filteredRequests]);
 
   const saldoDisponivel = totalOrcado - (valorReservado + valorAprovado);
@@ -266,21 +389,33 @@ export const AdminDashboard: React.FC = () => {
     if (aprovedReqs.length === 0 || positions.length === 0) return [];
 
     const grouped = aprovedReqs.reduce((acc, req) => {
-      acc[req.position_id] = (acc[req.position_id] || 0) + Number(req.valor);
+      if (!acc[req.position_id]) {
+        acc[req.position_id] = { valor: 0, count: 0, folga: 0, plus: 0 };
+      }
+      acc[req.position_id].valor += Number(req.valor);
+      acc[req.position_id].count += 1;
+      if (req.tipo_solicitacao === 'FOLGA_COMPENSATORIA') {
+        acc[req.position_id].folga += 1;
+      } else if (req.tipo_solicitacao === 'PLANTAO_PLUS') {
+        acc[req.position_id].plus += 1;
+      }
       return acc;
-    }, {} as Record<string, number>);
+    }, {} as Record<string, { valor: number; count: number; folga: number; plus: number }>);
 
     const totalAprov = aprovedReqs.reduce((acc, r) => acc + Number(r.valor), 0);
     const colors = ['#16a34a', '#2563eb', '#d97706', '#9333ea', '#db2777'];
 
     return Object.keys(grouped).map((posId, idx) => {
       const posInfo = positions.find(p => p.id === posId);
-      const val = grouped[posId];
+      const data = grouped[posId];
       return {
         name: posInfo ? posInfo.nome : 'Outros',
-        amount: val,
-        amountFormatted: new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2 }).format(val),
-        value: totalAprov > 0 ? Math.round((val / totalAprov) * 100) : 0,
+        amount: data.valor,
+        count: data.count,
+        folgaCount: data.folga,
+        plusCount: data.plus,
+        amountFormatted: new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2 }).format(data.valor),
+        value: totalAprov > 0 ? Math.round((data.valor / totalAprov) * 100) : 0,
         color: colors[idx % colors.length]
       };
     }).sort((a, b) => b.amount - a.amount);
@@ -303,7 +438,8 @@ export const AdminDashboard: React.FC = () => {
       
       let status = 'Normal';
       let color = '#16a34a';
-      if (consumoPct >= 80) { status = 'Crítico'; color = '#dc2626'; }
+      if (gasto === 0) { status = 'Sem Solicitações'; color = '#94a3b8'; }
+      else if (consumoPct >= 80) { status = 'Crítico'; color = '#dc2626'; }
       else if (consumoPct >= 65) { status = 'Atenção'; color = '#ea580c'; }
 
       return {
@@ -361,10 +497,256 @@ export const AdminDashboard: React.FC = () => {
     return [...unidades].sort((a, b) => b.consumoPct - a.consumoPct).slice(0, 5);
   }, [unidades]);
 
+  const rankingData = useMemo(() => {
+    const aprovadas = filteredRequests.filter(r => r.status === 'APROVADA');
+
+    const orcamentoMap: Record<string, number> = {};
+    filteredCycleEstablishments.forEach(ce => {
+      orcamentoMap[ce.establishment_id] = Number(ce.total_orcado || 0);
+    });
+
+    const rankUnidades: Record<string, { id: string, nome: string, complexidade: string, qFolga: number, qPlus: number, vFolga: number, vPlus: number, qTotal: number, vTotal: number }> = {};
+    const rankServidores: Record<string, { id: string, nome: string, cargo: string, estabelecimento: string, orcamentoEst: number, qFolga: number, qPlus: number, vFolga: number, vPlus: number, qTotal: number, vTotal: number }> = {};
+    const rankCargos: Record<string, { id: string, nome: string, qFolga: number, qPlus: number, vFolga: number, vPlus: number, qTotal: number, vTotal: number }> = {};
+
+    let totalGlobalFolga = 0;
+    let totalGlobalPlus = 0;
+
+    aprovadas.forEach(req => {
+       const empName = req.employees?.nome || 'Servidor Desconhecido';
+       const empId = req.employee_id || empName;
+       const posName = req.positions?.nome || 'Cargo Desconhecido';
+       const posId = req.position_id || posName;
+       const estName = req.establishments?.nome || 'Unidade Desconhecida';
+       const estComp = req.establishments?.complexidade || 'Sem Complexidade';
+       const estId = req.establishment_id || estName;
+
+       const val = Number(req.valor) || 0;
+       const isPlus = req.tipo_solicitacao === 'PLANTAO_PLUS';
+       const isFolga = req.tipo_solicitacao === 'FOLGA_COMPENSATORIA';
+       if (isPlus) totalGlobalPlus += val;
+       if (isFolga) totalGlobalFolga += val;
+
+       if (!rankUnidades[estId]) rankUnidades[estId] = { id: estId, nome: estName, complexidade: estComp, qFolga: 0, qPlus: 0, vFolga: 0, vPlus: 0, qTotal: 0, vTotal: 0 };
+       if (!rankServidores[empId]) rankServidores[empId] = { id: empId, nome: empName, cargo: posName, estabelecimento: estName, orcamentoEst: orcamentoMap[estId] || 0, qFolga: 0, qPlus: 0, vFolga: 0, vPlus: 0, qTotal: 0, vTotal: 0 };
+       if (!rankCargos[posId]) rankCargos[posId] = { id: posId, nome: posName, qFolga: 0, qPlus: 0, vFolga: 0, vPlus: 0, qTotal: 0, vTotal: 0 };
+
+       const addStats = (obj: any) => {
+         if (isPlus) { obj.qPlus++; obj.vPlus += val; }
+         if (isFolga) { obj.qFolga++; obj.vFolga += val; }
+         obj.qTotal++;
+         obj.vTotal += val;
+       };
+
+       addStats(rankUnidades[estId]);
+       addStats(rankServidores[empId]);
+       addStats(rankCargos[posId]);
+    });
+
+    const sortRanking = (record: any) => {
+      const arr = Object.values(record).sort((a: any, b: any) => b.qTotal - a.qTotal || b.vTotal - a.vTotal) as any[];
+      return arr.map((item, index) => ({ ...item, pos: index + 1 }));
+    };
+
+    const sortedUnidades = sortRanking(rankUnidades);
+    
+    const unidadesByLoc = sortedUnidades.reduce((acc, curr) => {
+      const comp = curr.complexidade;
+      if (!acc[comp]) acc[comp] = [];
+      curr.posGroup = acc[comp].length + 1;
+      acc[comp].push(curr);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    const totalGlobal = aprovadas.reduce((sum, r) => sum + (Number(r.valor) || 0), 0);
+    const sortedServidores = sortRanking(rankServidores) as any[];
+
+    // Determina o total de servidores relevante para o contexto atual do filtro
+    const totalContextoServidores = (() => {
+      if (globalSelectedUnits.length > 0) {
+        return globalSelectedUnits.reduce((sum, estId) => sum + (employeeCountByEst[estId] || 0), 0);
+      }
+      if (globalLocations.length > 0) {
+        return filteredCycleEstablishments.reduce((sum, ce) => sum + (employeeCountByEst[ce.establishment_id] || 0), 0);
+      }
+      return totalEmployees;
+    })();
+    const contextLabel = globalSelectedUnits.length > 0 || globalLocations.length > 0
+      ? 'nos estabelecimentos filtrados'
+      : 'na base da SEAP';
+
+     const baseOrcamento = totalOrcado > 0 ? totalOrcado : totalGlobal;
+     const gastoAprovado = totalGlobal;
+     const saldoRestante = Math.max(0, baseOrcamento - gastoAprovado);
+     const pctGasto = baseOrcamento > 0 ? Math.round((gastoAprovado / baseOrcamento) * 100) : 0;
+     const pctSaldo = baseOrcamento > 0 ? Math.round((saldoRestante / baseOrcamento) * 100) : 0;
+
+     let paretoMsg: string | null = null;
+     let paretoRec: string | null = null;
+     let paretoLevel: 'verde' | 'amarelo' | 'vermelho' | null = null;
+     let paretoPct = 0;
+     let paretoStats: { 
+       efetivo: number; 
+       compraram: number; 
+       naoCompraram: number; 
+       sliceReal: number;
+       baseOrcamento: number;
+       gastoAprovado: number;
+       saldoRestante: number;
+       pctGasto: number;
+       pctSaldo: number;
+     } | null = null;
+
+     if (totalContextoServidores > 0 && baseOrcamento > 0 && sortedServidores.length > 0) {
+        const top20Count = Math.max(1, Math.ceil(totalContextoServidores * 0.2));
+        const top20Slice = sortedServidores.slice(0, top20Count);
+        const top20Sum = top20Slice.reduce((acc, s) => acc + s.vTotal, 0);
+        const top20Qtd = top20Slice.reduce((acc, s) => acc + s.qTotal, 0);
+        paretoPct = Math.round((top20Sum / baseOrcamento) * 100);
+
+        const compraram = sortedServidores.length;
+        const naoCompraram = Math.max(0, totalContextoServidores - compraram);
+        const sliceReal = top20Slice.length;
+        paretoStats = { 
+          efetivo: totalContextoServidores, 
+          compraram, 
+          naoCompraram, 
+          sliceReal,
+          baseOrcamento,
+          gastoAprovado,
+          saldoRestante,
+          pctGasto,
+          pctSaldo,
+          top20Sum,
+          top20Qtd
+        };
+
+        if (paretoPct > 65) {
+           paretoLevel = 'vermelho';
+           paretoMsg = `Atenção: Os ${sliceReal} servidores no topo do ranking receberam juntos ${getFormatCurrency(top20Sum)} (${top20Qtd} solicitações), consumindo ${paretoPct}% de todo o orçamento planejado (${getFormatCurrency(baseOrcamento)}). A maior parte da verba foi concentrada neste pequeno grupo. (Veja os ${sliceReal} servidores destacados com a tag Top 20% na tabela abaixo ⬇️)`;
+           paretoRec = 'Recomenda-se uma revisão da distribuição das escalas extras.';
+        } else if (paretoPct > 50) {
+           paretoLevel = 'amarelo';
+           paretoMsg = `Os ${sliceReal} servidores no topo do ranking receberam juntos ${getFormatCurrency(top20Sum)} (${top20Qtd} solicitações), consumindo ${paretoPct}% de todo o orçamento planejado (${getFormatCurrency(baseOrcamento)}). A distribuição ainda é aceitável, mas começa a se concentrar. (Veja os ${sliceReal} servidores destacados com a tag Top 20% na tabela abaixo ⬇️)`;
+           paretoRec = 'Vale monitorar se esse padrão se repete nos próximos ciclos e considerar uma distribuição mais equitativa das escalas.';
+        } else {
+           paretoLevel = 'verde';
+           paretoMsg = `Os ${sliceReal} servidores no topo do ranking receberam juntos ${getFormatCurrency(top20Sum)} (${top20Qtd} solicitações), consumindo apenas ${paretoPct}% do orçamento planejado (${getFormatCurrency(baseOrcamento)}). A verba está bem distribuída e disponível para o efetivo. (Veja os ${sliceReal} servidores destacados com a tag Top 20% na tabela abaixo ⬇️)`;
+           paretoRec = null;
+        }
+     }
+
+     return {
+       servidores: sortedServidores,
+       cargos: sortRanking(rankCargos) as any[],
+       totalGlobal,
+       totalGlobalFolga,
+       totalGlobalPlus,
+       unidades: unidadesByLoc,
+       paretoMsg,
+       paretoRec,
+       paretoLevel,
+       paretoPct,
+       paretoStats,
+       paretoContextLabel: contextLabel
+     };
+  }, [filteredRequests, filteredCycleEstablishments, totalEmployees, employeeCountByEst, globalSelectedUnits, globalLocations, totalOrcado]);
+
+  const sortedRankingUnidades = useMemo(() => {
+    if (!rankUniSortCol) return rankingData.unidades;
+    
+    const sorted = { ...rankingData.unidades };
+    Object.keys(sorted).forEach(comp => {
+      sorted[comp] = [...sorted[comp]].sort((a, b) => {
+        let valA = a[rankUniSortCol];
+        let valB = b[rankUniSortCol];
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        if (valA < valB) return rankUniSortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return rankUniSortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+    });
+    return sorted;
+  }, [rankingData.unidades, rankUniSortCol, rankUniSortDir]);
+
+  const sortedRankingServidores = useMemo(() => {
+    if (!rankServSortCol) return rankingData.servidores;
+    return [...rankingData.servidores].sort((a, b) => {
+      let valA = a[rankServSortCol];
+      let valB = b[rankServSortCol];
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+      if (valA < valB) return rankServSortDir === 'asc' ? -1 : 1;
+      if (valA > valB) return rankServSortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [rankingData.servidores, rankServSortCol, rankServSortDir]);
+
+  const renderRankHeader = (
+    column: RankSortColumn, 
+    label: string, 
+    table: 'unidades' | 'servidores',
+    align: 'left' | 'right' | 'center' = 'left'
+  ) => {
+    const isActive = table === 'unidades' ? rankUniSortCol === column : rankServSortCol === column;
+    const direction = table === 'unidades' ? rankUniSortDir : rankServSortDir;
+
+    const handleSort = () => {
+      if (table === 'unidades') {
+        if (rankUniSortCol === column) setRankUniSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+        else { setRankUniSortCol(column); setRankUniSortDir('asc'); }
+      } else {
+        if (rankServSortCol === column) setRankServSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+        else { setRankServSortCol(column); setRankServSortDir('asc'); }
+      }
+    };
+
+    return (
+      <th 
+        onClick={handleSort}
+        style={{ 
+          cursor: 'pointer', 
+          textAlign: align,
+          userSelect: 'none',
+          padding: '12px 16px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start', gap: '4px' }}>
+          {label}
+          <div style={{ display: 'flex', flexDirection: 'column', opacity: isActive ? 1 : 0.2 }}>
+            <ChevronUp size={12} color={isActive && direction === 'asc' ? 'var(--color-primary)' : 'currentColor'} />
+            <ChevronDown size={12} color={isActive && direction === 'desc' ? 'var(--color-primary)' : 'currentColor'} style={{ margin: '-4px 0 0 0' }} />
+          </div>
+        </div>
+      </th>
+    );
+  };
+
+  const renderProportionBar = (value: number, total: number) => {
+    if (total === 0) return null;
+    const pct = Math.round((value / total) * 100);
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
+        <div style={{ width: '60px', height: '6px', background: 'var(--color-surface)', borderRadius: '3px', overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--color-primary)', borderRadius: '3px' }} />
+        </div>
+        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', minWidth: '28px', textAlign: 'right' }}>{pct}%</span>
+      </div>
+    );
+  };
+
+
+
   const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, tab: DashboardTab) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
     event.preventDefault();
-    const nextTab = tab === 'dashboard' ? 'detalhamento' : 'dashboard';
+    const order: DashboardTab[] = ['dashboard', 'detalhamento', 'ranking'];
+    const idx = order.indexOf(tab);
+    let nextIdx = event.key === 'ArrowRight' ? idx + 1 : idx - 1;
+    if (nextIdx >= order.length) nextIdx = 0;
+    if (nextIdx < 0) nextIdx = order.length - 1;
+    const nextTab = order[nextIdx];
     setActiveTab(nextTab);
     tabRefs.current[nextTab]?.focus();
   };
@@ -408,19 +790,18 @@ export const AdminDashboard: React.FC = () => {
     const list = [];
     const criticUnits = unidades.filter(u => u.consumoPct >= 80).length;
     if (criticUnits > 0) {
-      list.push({ type: 'danger', icon: <AlertTriangle size={18} color="#dc2626" />, text: <><span style={{fontWeight:600}}>{criticUnits} unidades</span> consumiram mais de 80% do orçamento.</> });
+      list.push({ type: 'danger', icon: <AlertTriangle size={18} color="#dc2626" />, text: <><span style={{fontWeight:600}}>{criticUnits} unidades</span> consumiram mais de 80% do orçamento.</>, action: () => { setActiveTab('detalhamento'); setStatusFilter('Crítico'); document.getElementById('detalhamento-panel')?.scrollIntoView({ behavior: 'smooth' }); } });
     }
     const inactiveUnits = unidades.filter(u => u.gasto === 0).length;
     if (inactiveUnits > 0) {
-      list.push({ type: 'warning', icon: <AlertCircle size={18} color="#ea580c" />, text: <><span style={{fontWeight:600}}>{inactiveUnits} unidades</span> ainda não realizaram solicitações.</> });
+      list.push({ type: 'warning', icon: <AlertCircle size={18} color="#ea580c" />, text: <><span style={{fontWeight:600}}>{inactiveUnits} unidades</span> ainda não realizaram solicitações.</>, action: () => { setActiveTab('detalhamento'); setStatusFilter('Sem Solicitações'); document.getElementById('detalhamento-panel')?.scrollIntoView({ behavior: 'smooth' }); } });
     }
     const pendingRequests = filteredRequests.filter(r => r.status === 'SOLICITADA');
     if (pendingRequests.length > 0) {
-       // simplificação para o alerta: qualquer pendente conta.
-      list.push({ type: 'info', icon: <Info size={18} color="#2563eb" />, text: <><span style={{fontWeight:600}}>{pendingRequests.length} solicitações</span> aguardam análise.</> });
+      list.push({ type: 'info', icon: <Info size={18} color="#2563eb" />, text: <><span style={{fontWeight:600}}>{pendingRequests.length} solicitações</span> aguardam análise.</>, action: () => navigate('/admin/solicitacoes') });
     }
     return list;
-  }, [unidades, filteredRequests]);
+  }, [unidades, filteredRequests, navigate]);
 
   // Gráfico de Linha (Agrupamento por Data de solicitacao)
   const lineChartData = useMemo(() => {
@@ -739,6 +1120,20 @@ export const AdminDashboard: React.FC = () => {
         >
           Detalhamento
         </button>
+        <button
+          ref={(element) => { tabRefs.current.ranking = element; }}
+          id="ranking-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'ranking'}
+          aria-controls="ranking-panel"
+          tabIndex={activeTab === 'ranking' ? 0 : -1}
+          className={`dashboard-tab${activeTab === 'ranking' ? ' dashboard-tab--active' : ''}`}
+          onClick={() => setActiveTab('ranking')}
+          onKeyDown={(event) => handleTabKeyDown(event, 'ranking')}
+        >
+          🏆 Ranking
+        </button>
       </div>
       {actionMessage && (
         <div className="dashboard-feedback" role="status" aria-live="polite">
@@ -782,7 +1177,7 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text-muted)' }}>
-            Saldo disponível: <span style={{ color: '#111827', fontWeight: 700 }}>{getFormatCurrency(saldoDisponivel)}</span>
+            Saldo disponível: <span style={{ color: '#111827', fontWeight: 700 }}>{getFormatCurrency(saldoDisponivel)} ({Math.max(0, 100 - percentualConsumido).toFixed(0)}%)</span>
           </div>
         </div>
 
@@ -791,14 +1186,21 @@ export const AdminDashboard: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-neutral-600)', textTransform: 'uppercase' }}>Folgas Compradas</div>
-              <div style={{ fontSize: '26px', fontWeight: 700, color: '#111827', marginTop: '8px' }}>{folgasCompradasCount}</div>
+              <div style={{ fontSize: '26px', fontWeight: 700, color: '#111827', marginTop: '8px' }}>{folgasCompradasStats.total}</div>
             </div>
             <div style={{ background: '#ffedd5', padding: '10px', borderRadius: '12px' }}>
                <FileText size={24} color="#ea580c" />
             </div>
           </div>
-          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', flex: 1 }}>
-            solicitações aprovadas no ciclo
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, marginTop: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Folga Compensatória:</span>
+              <span style={{ fontWeight: 600, color: '#3b82f6' }}>{folgasCompradasStats.folgaCount} ({folgasCompradasStats.folgaPct}%)</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+              <span style={{ color: 'var(--color-text-muted)' }}>Plantão Plus:</span>
+              <span style={{ fontWeight: 600, color: '#10b981' }}>{folgasCompradasStats.plusCount} ({folgasCompradasStats.plusPct}%)</span>
+            </div>
           </div>
           <div style={{ background: '#fef3c7', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, color: '#92400e', display: 'inline-flex', alignItems: 'center', gap: '6px', alignSelf: 'flex-start' }}>
             <AlertCircle size={14} /> {pendentesCount} aguardando análise
@@ -859,9 +1261,16 @@ export const AdminDashboard: React.FC = () => {
           <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', flex: 1 }}>
             Total de unidades ativas
           </div>
-          <div style={{ display: 'flex', gap: '16px', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4f46e5' }}></span>{establishmentsCount.capital} Capital</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981' }}></span>{establishmentsCount.interior} Interior</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px 16px', fontSize: '13px', fontWeight: 600, color: '#111827' }}>
+            {Object.entries(establishmentsCount.breakdown).sort(([a], [b]) => a.localeCompare(b)).map(([loc, count], idx) => {
+              const colors = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+              return (
+                <span key={loc} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: colors[idx % colors.length] }}></span>
+                  {count} {loc}
+                </span>
+              );
+            })}
           </div>
         </div>
 
@@ -870,7 +1279,12 @@ export const AdminDashboard: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-neutral-600)', textTransform: 'uppercase' }}>Dias Restantes</div>
-              <div style={{ fontSize: '26px', fontWeight: 700, color: '#111827', marginTop: '8px' }}>{diasRestantes} dias</div>
+              <div style={{ fontSize: '26px', fontWeight: 700, color: '#111827', marginTop: '8px', display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                {diasRestantes} dias
+                <span style={{ fontSize: '16px', fontWeight: 500, color: 'var(--color-neutral-500)' }}>
+                  ({tempoRestante.horas}h {tempoRestante.minutos}m)
+                </span>
+              </div>
             </div>
             <div style={{ background: '#ffedd5', padding: '10px', borderRadius: '12px' }}>
                <Calendar size={24} color="#ea580c" />
@@ -961,10 +1375,12 @@ export const AdminDashboard: React.FC = () => {
                   {pieData.map((item, idx) => (
                     <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.color }}></div>
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: item.color, flexShrink: 0 }}></div>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                           <span style={{ fontSize: '13px', fontWeight: 600 }}>{item.name}</span>
-                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>R$ {item.amountFormatted}</span>
+                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                            R$ {item.amountFormatted} • <strong style={{ color: '#334155', fontWeight: 600 }}>{item.count} {item.count === 1 ? 'folga' : 'folgas'}</strong>
+                          </span>
                         </div>
                       </div>
                       <span style={{ fontSize: '14px', fontWeight: 700 }}>{item.value}%</span>
@@ -1009,7 +1425,7 @@ export const AdminDashboard: React.FC = () => {
 
             <div style={{ display: 'flex', gap: '8px' }}>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#ecfdf5', padding: '12px 8px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
-                 <div style={{ fontSize: '18px', fontWeight: 700, color: '#047857' }}>{folgasCompradasCount}</div>
+                 <div style={{ fontSize: '18px', fontWeight: 700, color: '#047857' }}>{folgasCompradasStats.total}</div>
                  <div style={{ fontSize: '11px', fontWeight: 600, color: '#065f46', marginTop: '4px' }}>Aprovadas</div>
               </div>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', background: '#fef2f2', padding: '12px 8px', borderRadius: '8px', border: '1px solid #fecaca' }}>
@@ -1023,9 +1439,11 @@ export const AdminDashboard: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0fdf4', padding: '12px', borderRadius: '8px', border: '1px solid #bbf7d0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ background: '#dcfce7', padding: '8px', borderRadius: '50%' }}><Landmark size={18} color="#16a34a" /></div>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: '#065f46', opacity: 0.5 }}>Enviadas p/ Folha</span>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#065f46', opacity: activeCycle?.status === 'FECHADO' ? 1 : 0.5 }}>Enviadas p/ Folha</span>
               </div>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: '#047857', opacity: 0.5 }}>0</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#047857', opacity: activeCycle?.status === 'FECHADO' ? 1 : 0.5 }}>
+                {activeCycle?.status === 'FECHADO' ? folgasCompradasStats.total : 0}
+              </span>
             </div>
 
           </div>
@@ -1095,11 +1513,16 @@ export const AdminDashboard: React.FC = () => {
         <div className="modern-card">
           <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-neutral-600)' }}>Alertas Importantes</h3>
-            <button type="button" className="dashboard-inline-action" onClick={() => setActionMessage(alertas.length > 0 ? `${alertas.length} alerta(s) em destaque no painel.` : 'Nenhum alerta ativo no momento.')}>Ver todos &rarr;</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {alertas.length > 0 ? alertas.map((alert, idx) => (
-              <div key={idx} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+              <div 
+                key={idx} 
+                style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', cursor: alert.action ? 'pointer' : 'default', padding: '8px', borderRadius: '8px', transition: 'background-color 0.2s', marginLeft: '-8px', marginRight: '-8px' }}
+                onClick={alert.action}
+                onMouseEnter={(e) => alert.action && (e.currentTarget.style.backgroundColor = 'var(--color-neutral-100)')}
+                onMouseLeave={(e) => alert.action && (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
                 <div style={{ marginTop: '2px' }}>{alert.icon}</div>
                 <div style={{ fontSize: '13px', color: 'var(--color-text)' }}>
                   {alert.text}
@@ -1142,6 +1565,7 @@ export const AdminDashboard: React.FC = () => {
               <option value="Normal">Normal</option>
               <option value="Atenção">Atenção</option>
               <option value="Crítico">Crítico</option>
+              <option value="Sem Solicitações">Sem Solicitações</option>
             </select>
             <select
               className="input dashboard-filter-select"
@@ -1222,6 +1646,455 @@ export const AdminDashboard: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        </div>
+      )}
+
+      {activeTab === 'ranking' && (
+        <div 
+          id="ranking-panel"
+          role="tabpanel"
+          aria-labelledby="ranking-tab"
+          className="dashboard-panel"
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-6)' }}
+        >
+          {rankingData.paretoMsg && (() => {
+            const level = rankingData.paretoLevel;
+            const pct = rankingData.paretoPct;
+            const stats = rankingData.paretoStats;
+            const rec = rankingData.paretoRec;
+            const ctxLabel = rankingData.paretoContextLabel;
+
+            const statusConfig = {
+              verde: {
+                badgeBg: '#f0fdf4',
+                badgeBorder: '#bbf7d0',
+                badgeText: '#166534',
+                barColor: '#10b981',
+                label: 'Distribuição Regular'
+              },
+              amarelo: {
+                badgeBg: '#fffbeb',
+                badgeBorder: '#fde68a',
+                badgeText: '#92400e',
+                barColor: '#f59e0b',
+                label: 'Concentração Moderada'
+              },
+              vermelho: {
+                badgeBg: '#fff1f2',
+                badgeBorder: '#fecdd3',
+                badgeText: '#9f1239',
+                barColor: '#ef4444',
+                label: 'Alta Concentração'
+              }
+            };
+            const cfg = statusConfig[level as 'verde' | 'amarelo' | 'vermelho'];
+
+            return (
+              <div 
+                className="dashboard-card" 
+                style={{ 
+                  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)', 
+                  border: '1px solid #cbd5e1', 
+                  borderTop: `4px solid ${cfg.barColor}`,
+                  borderRadius: '12px', 
+                  padding: '24px', 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '20px', 
+                  boxShadow: '0 4px 16px -2px rgba(15, 23, 42, 0.07), 0 2px 6px -1px rgba(15, 23, 42, 0.04)' 
+                }}
+              >
+
+                {/* Header Corporativo */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: cfg.barColor, display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '4px' }}>
+                      <Scale size={13} /> Diagnóstico Executivo de Distribuição
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
+                      Análise de Concentração Orçamentária (Princípio de Pareto)
+                    </h3>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
+                      Monitoramento da distribuição de recursos indenizatórios sobre o efetivo {ctxLabel}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      padding: '4px 12px', 
+                      borderRadius: '20px', 
+                      fontSize: '12px', 
+                      fontWeight: 600, 
+                      background: cfg.badgeBg, 
+                      color: cfg.badgeText, 
+                      border: `1px solid ${cfg.badgeBorder}` 
+                    }}>
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: cfg.barColor }} />
+                      {cfg.label}
+                    </span>
+                    <span style={{ 
+                      fontSize: '13px', 
+                      fontWeight: 700, 
+                      color: '#0f172a', 
+                      background: '#ffffff', 
+                      padding: '4px 10px', 
+                      borderRadius: '6px', 
+                      border: '1px solid #cbd5e1' 
+                    }}>
+                      Top 20%: {pct}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Grid Executivo: Efetivo vs Execução Orçamentária */}
+                {stats && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+                    {/* Bloco 1: Efetivo */}
+                    <div style={{ background: '#ffffff', borderRadius: '8px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Users size={15} color="#475569" /> Indicadores de Efetivo
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Efetivo Total</div>
+                          <div style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{stats.efetivo.toLocaleString('pt-BR')}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Servidores Indenizados</div>
+                          <div style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>
+                            {stats.compraram} <span style={{ fontSize: '12px', fontWeight: 500, color: '#64748b' }}>({Math.round((stats.compraram / stats.efetivo) * 100)}%)</span>
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Sem Indenização</div>
+                          <div style={{ fontSize: '18px', fontWeight: 700, color: '#64748b' }}>{stats.naoCompraram}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Corte Top 20% (Amostra)</div>
+                          <div style={{ fontSize: '18px', fontWeight: 700, color: cfg.badgeText }}>{stats.sliceReal} servidores</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bloco 2: Execução Financeira */}
+                    <div style={{ background: '#ffffff', borderRadius: '8px', padding: '16px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748b', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Wallet size={15} color="#475569" /> Execução Financeira
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Orçamento Planejado</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>{getFormatCurrency(stats.baseOrcamento)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Total Aprovado (Desembolso)</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: cfg.barColor }}>
+                            {getFormatCurrency(stats.gastoAprovado)} <span style={{ fontSize: '11px', fontWeight: 600 }}>({stats.pctGasto}%)</span>
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Saldo Disponível</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: stats.saldoRestante > 0 ? '#15803d' : '#b91c1c' }}>
+                            {getFormatCurrency(stats.saldoRestante)} <span style={{ fontSize: '11px', fontWeight: 600 }}>({stats.pctSaldo}%)</span>
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '11px', color: '#64748b' }}>Desembolso Top 20%</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                            {getFormatCurrency(stats.top20Sum)} <span style={{ fontSize: '11px', fontWeight: 600, color: cfg.badgeText }}>({pct}% orç.)</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Barra de Distribuição de Pareto */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', fontSize: '12px' }}>
+                    <span style={{ fontWeight: 600, color: '#334155' }}>Índice de Absorção Orçamentária pelo Top 20% do Efetivo</span>
+                    <span style={{ fontWeight: 700, color: cfg.badgeText }}>{pct}% do orçamento consumido pelo grupo</span>
+                  </div>
+                  <div style={{ position: 'relative', width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '4px' }}>
+                    <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: cfg.barColor, borderRadius: '4px', transition: 'width 0.4s ease' }} />
+                    <div style={{ position: 'absolute', left: '50%', top: '-3px', width: '2px', height: '14px', background: '#f59e0b' }} title="Limite de Atenção (50%)" />
+                    <div style={{ position: 'absolute', left: '65%', top: '-3px', width: '2px', height: '14px', background: '#ef4444' }} title="Limite Crítico (65%)" />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '11px', color: '#94a3b8', position: 'relative' }}>
+                    <span>0%</span>
+                    <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', color: '#d97706', fontWeight: 600 }}>50% Limiar de Atenção</span>
+                    <span style={{ position: 'absolute', left: '65%', transform: 'translateX(-50%)', color: '#dc2626', fontWeight: 600 }}>65% Limiar Crítico</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                {/* Tabela Corporativa de Distribuição por Cargo */}
+                {rankingData.cargos && rankingData.cargos.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#0f172a', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Layers size={16} color="#64748b" /> Distribuição Orçamentária por Cargo
+                    </div>
+                    <div className="table-responsive" style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                      <table className="table" style={{ margin: 0, width: '100%', fontSize: '13px' }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                            <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: '#475569' }}>Cargo</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600, color: '#475569' }}>Solicitações Aprovadas</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#475569' }}>Desembolso Aprovado</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#475569' }}>% do Orçamento</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '180px', fontWeight: 600, color: '#475569' }}>Proporção</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rankingData.cargos.map((cargo: any) => {
+                            const pctOrc = stats?.baseOrcamento && stats.baseOrcamento > 0
+                              ? Number(((cargo.vTotal / stats.baseOrcamento) * 100).toFixed(1))
+                              : 0;
+                            return (
+                              <tr key={cargo.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                <td style={{ padding: '10px 14px', fontWeight: 600, color: '#1e293b' }}>{cargo.nome}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                  {cargo.qTotal} <span style={{ fontSize: '11px', color: '#94a3b8' }}>({cargo.qFolga} folga / {cargo.qPlus} plus)</span>
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{getFormatCurrency(cargo.vTotal)}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: '#334155' }}>{pctOrc}%</td>
+                                <td style={{ padding: '10px 14px' }}>
+                                  <div style={{ width: '100%', height: '6px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden' }}>
+                                    <div style={{ width: `${Math.min(pctOrc, 100)}%`, height: '100%', background: '#3b82f6', borderRadius: '3px' }} />
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Nota Técnica de Auditoria */}
+                <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px 16px', border: '1px solid #e2e8f0', display: 'flex', gap: '10px', alignItems: 'flex-start', fontSize: '12px', color: '#475569' }}>
+                  <Info size={16} color="#64748b" style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <div>
+                    <strong>Nota Técnica:</strong> O corte amostral de 20% do efetivo ({stats?.sliceReal} servidores) absorveu {getFormatCurrency(stats?.top20Sum || 0)} ({pct}% do orçamento planejado). Os servidores desse grupo estão identificados com a tag <code>Top 20%</code> na listagem nominal abaixo. {rec && <span style={{ marginLeft: '4px', color: '#92400e', fontWeight: 600 }}>{rec}</span>}
+                  </div>
+                </div>
+
+                {/* Legenda de Classificação */}
+                <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '12px', color: '#64748b', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                    Até 50% — Distribuição Regular
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f59e0b' }} />
+                    50% a 65% — Concentração Moderada
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                    Acima de 65% — Concentração Crítica
+                  </span>
+                </div>
+
+              </div>
+            );
+          })()}
+
+          {/* Tabela de Ranking por Unidade (Agrupado por Complexidade) */}
+          {Object.entries(sortedRankingUnidades).map(([comp, units]) => (
+            <div key={comp} className="dashboard-card" style={{ background: '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+                <h3 style={{ margin: 0, color: 'var(--color-text-base)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🏢 Unidades - {comp}
+                </h3>
+              </div>
+              <div className="table-responsive">
+                <table className="table" style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: '12px 16px' }}>Pos</th>
+                      {renderRankHeader('nome', 'Unidade', 'unidades')}
+                      {renderRankHeader('qFolga', 'Folgas', 'unidades', 'center')}
+                      {renderRankHeader('qPlus', 'Plantões Plus', 'unidades', 'center')}
+                      {renderRankHeader('qTotal', 'Total (Qtd)', 'unidades', 'center')}
+                      {renderRankHeader('vTotal', 'Total (R$)', 'unidades', 'right')}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {units.map((u, i) => (
+                      <tr key={u.id}>
+                        <td style={{ padding: '12px 16px' }}>{u.posGroup}º</td>
+                        <td style={{ fontWeight: 600 }}>{u.nome}</td>
+                        <td style={{ textAlign: 'center' }}>{u.qFolga}</td>
+                        <td style={{ textAlign: 'center' }}>{u.qPlus}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 600, color: '#3b82f6' }}>{u.qTotal}</td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 600, color: '#0f172a' }}>{getFormatCurrency(u.vTotal)}</div>
+                          {renderProportionBar(u.vTotal, rankingData.totalGlobal)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {units.length > 0 && (
+                    <tfoot>
+                      <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0', fontWeight: 700 }}>
+                        <td colSpan={2} style={{ padding: '12px 16px', color: '#0f172a' }}>
+                          Total ({units.length} unidades)
+                        </td>
+                        <td style={{ textAlign: 'center', color: '#0f172a' }}>
+                          {units.reduce((acc, u) => acc + u.qFolga, 0)}
+                        </td>
+                        <td style={{ textAlign: 'center', color: '#0f172a' }}>
+                          {units.reduce((acc, u) => acc + u.qPlus, 0)}
+                        </td>
+                        <td style={{ textAlign: 'center', color: '#3b82f6' }}>
+                          {units.reduce((acc, u) => acc + u.qTotal, 0)}
+                        </td>
+                        <td style={{ textAlign: 'right', color: '#0f172a' }}>
+                          {getFormatCurrency(units.reduce((acc, u) => acc + u.vTotal, 0))}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          ))}
+
+          {/* Ranking por Servidor */}
+          <div className="dashboard-card" style={{ background: '#fff' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+              <h3 style={{ margin: 0, color: 'var(--color-text-base)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🧑‍⚖️ Ranking por Servidores
+              </h3>
+            </div>
+            <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              <table className="table" style={{ width: '100%' }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#f8fafc', zIndex: 1 }}>
+                  <tr>
+                    <th style={{ padding: '12px 16px' }}>Pos</th>
+                    {renderRankHeader('nome', 'Servidor', 'servidores')}
+                    {renderRankHeader('cargo', 'Cargo', 'servidores')}
+                    {renderRankHeader('estabelecimento', 'Estabelecimento', 'servidores')}
+                    {renderRankHeader('qFolga', 'Folgas', 'servidores', 'center')}
+                    {renderRankHeader('qPlus', 'Plantões Plus', 'servidores', 'center')}
+                    {renderRankHeader('qTotal', 'Total (Qtd)', 'servidores', 'center')}
+                    {renderRankHeader('vTotal', 'Total (R$)', 'servidores', 'right')}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedRankingServidores.map((s, i) => (
+                    <tr key={s.id}>
+                      <td style={{ padding: '12px 16px' }}>{s.pos}º</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span 
+                            style={{ fontWeight: 600, cursor: 'help' }} 
+                            title={`Este servidor consumiu ${s.orcamentoEst > 0 ? Math.round((s.vTotal / s.orcamentoEst) * 100) : 0}% do orçamento de ${s.estabelecimento} (Orçamento Total: ${getFormatCurrency(s.orcamentoEst)})`}
+                          >
+                            {s.nome}
+                          </span>
+                          {s.pos <= (rankingData.paretoStats?.sliceReal || 0) && (
+                            <span style={{ display: 'inline-block', fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '10px', background: '#f3e8ff', color: '#7e22ce', border: '1px solid #d8b4fe' }}>Top 20%</span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ color: 'var(--color-text-muted)' }}>{s.cargo}</td>
+                      <td style={{ color: 'var(--color-text-muted)' }}>{s.estabelecimento}</td>
+                      <td style={{ textAlign: 'center' }}>{s.qFolga}</td>
+                      <td style={{ textAlign: 'center' }}>{s.qPlus}</td>
+                      <td style={{ textAlign: 'center', fontWeight: 600, color: '#3b82f6' }}>{s.qTotal}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ fontWeight: 600, color: '#0f172a' }}>{getFormatCurrency(s.vTotal)}</div>
+                        {renderProportionBar(s.vTotal, s.orcamentoEst)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {sortedRankingServidores.length > 0 && (
+                  <tfoot style={{ position: 'sticky', bottom: 0, background: '#f8fafc', zIndex: 1 }}>
+                    <tr style={{ borderTop: '2px solid #e2e8f0', fontWeight: 700 }}>
+                      <td colSpan={4} style={{ padding: '12px 16px', color: '#0f172a' }}>
+                        Total Geral ({sortedRankingServidores.length} servidores)
+                      </td>
+                      <td style={{ textAlign: 'center', color: '#0f172a' }}>
+                        {sortedRankingServidores.reduce((acc, s) => acc + s.qFolga, 0)}
+                      </td>
+                      <td style={{ textAlign: 'center', color: '#0f172a' }}>
+                        {sortedRankingServidores.reduce((acc, s) => acc + s.qPlus, 0)}
+                      </td>
+                      <td style={{ textAlign: 'center', color: '#3b82f6' }}>
+                        {sortedRankingServidores.reduce((acc, s) => acc + s.qTotal, 0)}
+                      </td>
+                      <td style={{ textAlign: 'right', color: '#0f172a' }}>
+                        {getFormatCurrency(sortedRankingServidores.reduce((acc, s) => acc + s.vTotal, 0))}
+                      </td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 'var(--space-6)' }}>
+            {/* Gráfico Donut (Distribuição) */}
+            <div className="dashboard-card" style={{ background: '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+                <h3 style={{ margin: 0, color: 'var(--color-text-base)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🍩 Distribuição de Orçamento
+                </h3>
+              </div>
+              <div style={{ height: '350px', marginTop: 'var(--space-4)' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Folga Compensatória', value: rankingData.totalGlobalFolga, fill: '#3b82f6' },
+                        { name: 'Plantão Plus', value: rankingData.totalGlobalPlus, fill: '#10b981' }
+                      ]}
+                      cx="50%" cy="50%"
+                      innerRadius={60}
+                      outerRadius={110}
+                      paddingAngle={5}
+                      dataKey="value"
+                      label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      <Cell key="cell-0" fill="#3b82f6" />
+                      <Cell key="cell-1" fill="#10b981" />
+                    </Pie>
+                    <RechartsTooltip formatter={(val: number) => getFormatCurrency(val)} />
+                    <Legend verticalAlign="bottom" height={36} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Ranking por Cargo */}
+            <div className="dashboard-card" style={{ background: '#fff' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-4)' }}>
+                <h3 style={{ margin: 0, color: 'var(--color-text-base)', fontSize: '18px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  💼 Cargos que mais consumiram (Top 10)
+                </h3>
+              </div>
+              <div style={{ height: '350px', marginTop: 'var(--space-4)' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={rankingData.cargos.slice(0, 10)} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" tickFormatter={(v) => getFormatCurrency(v).replace('R$', '').trim()} />
+                    <YAxis dataKey="nome" type="category" width={180} tick={{ fontSize: 11, fill: '#475569' }} />
+                    <RechartsTooltip formatter={(val: number) => getFormatCurrency(val)} />
+                    <Legend verticalAlign="bottom" height={36} />
+                    <Bar dataKey="vFolga" name="Folga Compensatória (R$)" stackId="a" fill="#3b82f6" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="vPlus" name="Plantão Plus (R$)" stackId="a" fill="#10b981" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
 
         </div>
       )}

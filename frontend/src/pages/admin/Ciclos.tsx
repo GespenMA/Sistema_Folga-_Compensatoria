@@ -304,6 +304,39 @@ export const Ciclos: React.FC = () => {
       onConfirm: async () => {
         setConfirmModal(prev => ({ ...prev, isLoading: true }));
         try {
+          // 1. Busca todas as solicitações pendentes (não analisadas) neste ciclo
+          const { data: pendingRequests, error: fetchErr } = await supabase
+            .from('purchase_requests')
+            .select('id, compensatory_day_id')
+            .eq('cycle_id', cycleId)
+            .eq('status', 'SOLICITADA');
+            
+          if (fetchErr) throw fetchErr;
+
+          // 2. Rejeita automaticamente e devolve os dias
+          if (pendingRequests && pendingRequests.length > 0) {
+             const now = new Date().toISOString();
+             for (const req of pendingRequests) {
+                await supabase
+                  .from('purchase_requests')
+                  .update({
+                     status: 'REJEITADA',
+                     rejection_reason: 'Rejeitada automaticamente por encerramento do ciclo',
+                     analyzed_by: profile?.id,
+                     analyzed_at: now
+                  })
+                  .eq('id', req.id);
+                  
+                if (req.compensatory_day_id) {
+                   await supabase
+                     .from('compensatory_days')
+                     .update({ status: 'GERADA' })
+                     .eq('id', req.compensatory_day_id);
+                }
+             }
+          }
+
+          // 3. Fecha o ciclo de fato
           const { error } = await supabase
             .from('cycles')
             .update({
