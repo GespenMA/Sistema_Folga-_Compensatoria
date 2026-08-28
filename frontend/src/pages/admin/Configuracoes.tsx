@@ -1001,7 +1001,12 @@ export const Configuracoes: React.FC = () => {
                               <td style={{ padding: '7px 12px' }}>{row.nome}</td>
                               <td style={{ padding: '7px 12px', fontSize: '11px' }}>{row.cargo}</td>
                               <td style={{ padding: '7px 12px', fontSize: '11px' }}>{row.estabelecimento}</td>
-                              <td style={{ padding: '7px 12px', textAlign: 'center' }}>{row.trabalhadas}</td>
+                              <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                                {/* O cálculo já está certo (minutosNovos vem de parseHorasMinutos, que trata
+                                    o valor do Excel como fração de dias); só a exibição mostrava o decimal
+                                    bruto da planilha ("5.7048611111111") em vez de horas/minutos legíveis. */}
+                                {`${Math.floor(row.minutosNovos / 60)}h${String(row.minutosNovos % 60).padStart(2, '0')}min`}
+                              </td>
                               <td style={{ padding: '7px 12px', textAlign: 'center', fontWeight: 700 }}>
                                 {row.erros.length > 0 ? <span style={{ color: '#dc2626' }}>⚠️ {row.erros[0]}</span> : row.plantoes}
                               </td>
