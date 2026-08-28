@@ -169,7 +169,20 @@ export const Solicitacoes: React.FC = () => {
           .eq('status', 'GERADA')
           .order('generated_at', { ascending: false });
         
-        if (folgas) setFolgasDisponiveis(folgas as unknown as FolgaDisponivel[]);
+        if (folgas) {
+          // Defesa contra um caso raro: se o servidor dono da folga foi transferido pra
+          // outra unidade depois que ela foi gerada, o RLS de `employees` (que filtra pela
+          // lotação ATUAL, não pelo establishment_id fixo da folga) bloqueia o embed e o
+          // PostgREST devolve `employees: null` — mesmo a folga em si continuando visível
+          // (RLS de compensatory_days usa a coluna fixa). Sem esse filtro, a tela inteira
+          // quebrava ao tentar ler f.employees.positions. Ver [[gaps-logica-ciclos]] item 5.
+          const validas = (folgas as unknown as FolgaDisponivel[]).filter(f => f.employees != null);
+          const semServidor = folgas.length - validas.length;
+          if (semServidor > 0) {
+            console.warn(`${semServidor} folga(s) GERADA ocultada(s): servidor foi transferido para outra unidade e o RLS de employees bloqueia a visualização. IDs:`, (folgas as any[]).filter(f => f.employees == null).map(f => f.id));
+          }
+          setFolgasDisponiveis(validas);
+        }
 
         // 2b. Busca folgas usufruidas
         const { data: usufruidas } = await supabase
