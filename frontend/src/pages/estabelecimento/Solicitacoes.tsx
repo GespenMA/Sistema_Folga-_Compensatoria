@@ -323,8 +323,8 @@ export const Solicitacoes: React.FC = () => {
       return;
     }
 
-    if (dataPlantao > activeCycle.data_fim) {
-      setInfoModal({ title: 'Data Inválida', message: 'A data do plantão não pode ultrapassar o encerramento do ciclo atual.', type: 'error' });
+    if (dataPlantao < activeCycle.data_inicio || dataPlantao > activeCycle.data_fim) {
+      setInfoModal({ title: 'Data Inválida', message: `A data do plantão precisa estar dentro do ciclo vigente (${new Date(activeCycle.data_inicio + 'T12:00:00').toLocaleDateString('pt-BR')} a ${new Date(activeCycle.data_fim + 'T12:00:00').toLocaleDateString('pt-BR')}).`, type: 'error' });
       return;
     }
 
@@ -466,8 +466,8 @@ export const Solicitacoes: React.FC = () => {
     e.preventDefault();
     if (selectedFolgas.length === 0 || !profile || !activeCycle || !dataPlantao) return;
     
-    if (dataPlantao > activeCycle.data_fim) {
-      setInfoModal({ title: 'Data Inválida', message: 'A data do plantão não pode ultrapassar o encerramento do ciclo atual.', type: 'error' });
+    if (dataPlantao < activeCycle.data_inicio || dataPlantao > activeCycle.data_fim) {
+      setInfoModal({ title: 'Data Inválida', message: `A data do plantão precisa estar dentro do ciclo vigente (${new Date(activeCycle.data_inicio + 'T12:00:00').toLocaleDateString('pt-BR')} a ${new Date(activeCycle.data_fim + 'T12:00:00').toLocaleDateString('pt-BR')}).`, type: 'error' });
       return;
     }
 
@@ -1502,14 +1502,18 @@ export const Solicitacoes: React.FC = () => {
             <form onSubmit={selectedFolga ? handleComprar : handleBulkComprarForm}>
               <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
                 <label>Informe a data efetiva em que o servidor prestou o plantão que está sendo comprado. *</label>
-                <input 
+                <input
                   type="date"
                   className="input"
                   required
                   value={dataPlantao}
                   onChange={e => setDataPlantao(e.target.value)}
+                  min={activeCycle.data_inicio}
                   max={activeCycle.data_fim}
                 />
+                <div style={{ marginTop: '8px', padding: '10px 12px', background: 'rgba(239,68,68,0.05)', borderRadius: '6px', borderLeft: '3px solid var(--color-danger)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.4 }}>
+                  <strong>⚠️ Atenção:</strong> esta data precisa ser o dia real em que o servidor efetivamente trabalhou. Ao confirmar esta compra, a unidade está indenizando (pagando) o servidor por esse plantão — ele continua trabalhando nessa data, no lugar de usufruir a folga.
+                </div>
               </div>
 
               <div className="field" style={{ marginBottom: 'var(--space-4)' }}>
