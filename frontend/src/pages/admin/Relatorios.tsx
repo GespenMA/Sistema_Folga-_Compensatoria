@@ -32,6 +32,10 @@ type DetalhEstRow = {
   nome_servidor: string;
   tipo_solicitacao: string;
   data_detalhe: string;
+  // Data única (Plantão Plus) em formato ISO "YYYY-MM-DD", ou null quando data_detalhe é um
+  // período (Folga Compensatória) ou "—". Usado só na exportação XLSX, para gravar uma célula
+  // de data de verdade em vez de texto — ver exportXLSX.
+  data_plantao_raw: string | null;
   justificativa: string;
   valor_aprovado: number;
 };
@@ -79,6 +83,17 @@ type ActiveTab = 'orcado_gasto' | 'detalhe_est' | 'folha_servidor' | 'folgas_usu
 // =============================================
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
+
+// Constrói uma data no fuso local à meia-noite exata (sem hora nenhuma), a partir de uma
+// string "YYYY-MM-DD". Usado só para células de data nativas do Excel (ex: exportXLSX) — o
+// SheetJS lê os getters locais do Date pra montar o serial, então: (1) não pode usar
+// Date.UTC/'T12:00:00Z', porque num fuso diferente de UTC isso desloca o dia; (2) não pode
+// deixar hora nenhuma (nem meio-dia), senão o serial fica fracionário e o Excel mostra
+// "25/08/2026 12:00:00" na barra de fórmulas em vez de só a data.
+const dataLocalSemHora = (iso: string): Date => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
 
 // =============================================
 // COMPONENTE PRINCIPAL
@@ -282,6 +297,7 @@ export const Relatorios: React.FC = () => {
         nome_servidor: row.employees?.nome || '—',
         tipo_solicitacao: row.tipo_solicitacao,
         data_detalhe,
+        data_plantao_raw: row.data_plantao || null,
         justificativa: row.justificativa || '—',
         valor_aprovado: Number(row.valor) || 0,
       };
@@ -547,6 +563,7 @@ export const Relatorios: React.FC = () => {
 
     if (activeTab === 'orcado_gasto') {
       const rows = orcadoGastoData.map(r => ({
+        'Ciclo': cicloNome,
         'Estabelecimento Penal': r.nome,
         'Valor Orçado (R$)': r.total_orcado,
         'Valor Gasto (R$)': r.valor_gasto,
@@ -557,20 +574,52 @@ export const Relatorios: React.FC = () => {
       const ws = XLSX.utils.json_to_sheet(rows);
       XLSX.utils.book_append_sheet(wb, ws, 'Orçado vs Gasto');
     } else if (activeTab === 'detalhe_est') {
+      // Data / Período: quando é uma data única (Plantão Plus), grava uma célula de data de
+      // verdade — não texto. Uma string "23/08/2026" já sai correta do nosso código (é
+      // exatamente isso que vai pro arquivo), mas alguns leitores de XLSX/config regional do
+      // Windows reinterpretam texto parecido com data e o exibem errado (ex: ano cortado pra
+      // "206"). Uma célula de data nativa, com formato "dd/mm/yyyy" embutido no arquivo, não
+      // fica sujeita a essa reinterpretação. Período (Folga Compensatória) continua texto,
+      // já que não dá pra representar duas datas numa única célula de data.
       const rows = detalhEstData.map(r => ({
+        'Ciclo': cicloNome,
         'Estabelecimento Penal': r.nome_est,
         'Servidor': r.nome_servidor,
         'Matrícula': r.matricula,
         'Cargo': r.nome_cargo,
         'Tipo': r.tipo_solicitacao === 'PLANTAO_PLUS' ? 'Plantão Plus' : 'Folga Compensatória',
-        'Data / Período': r.data_detalhe,
+        'Data / Período': r.data_plantao_raw ? dataLocalSemHora(r.data_plantao_raw) : r.data_detalhe,
         'Justificativa': r.justificativa,
         'Valor Aprovado (R$)': r.valor_aprovado,
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
+      // json_to_sheet grava Date como serial numérico com formato padrão americano
+      // ("m/d/yy") — troca pro formato brasileiro em cada célula de data desta coluna
+      // (G: Ciclo=A, Estabelecimento=B, Servidor=C, Matrícula=D, Cargo=E, Tipo=F, Data=G).
+      for (let i = 0; i < rows.length; i++) {
+        const cellRef = XLSX.utils.encode_cell({ r: i + 1, c: 6 });
+        const cell = ws[cellRef];
+        if (cell && cell.t === 'n') cell.z = 'dd/mm/yyyy';
+      }
+      // Largura das colunas: sem isso o Excel usa uma largura padrão estreita, e como a
+      // coluna de data agora tem células de data "de verdade" (não texto), uma coluna
+      // estreita demais mostra "#####" em vez do valor — texto simplesmente estourava
+      // visualmente, número/data não.
+      ws['!cols'] = [
+        { wch: 16 }, // Ciclo
+        { wch: 32 }, // Estabelecimento Penal
+        { wch: 28 }, // Servidor
+        { wch: 12 }, // Matrícula
+        { wch: 30 }, // Cargo
+        { wch: 18 }, // Tipo
+        { wch: 22 }, // Data / Período
+        { wch: 50 }, // Justificativa
+        { wch: 16 }, // Valor Aprovado (R$)
+      ];
       XLSX.utils.book_append_sheet(wb, ws, 'Detalhe por Estabelecimento');
     } else if (activeTab === 'folha_servidor') {
       const rows = folhaFiltered.map(r => ({
+        'Ciclo': cicloNome,
         'Matrícula': r.matricula,
         'Nome do Servidor': r.nome,
         'Cargo': r.cargo_nome,
@@ -645,9 +694,10 @@ export const Relatorios: React.FC = () => {
 
         autoTable(doc, {
           startY: 36,
-          head: [['Estabelecimento Penal', 'Valor Orçado', 'Valor Gasto (Aprov.)', 'Valor Reservado (Pend.)', 'Saldo Disponível', '% Exec.']],
+          head: [['Ciclo', 'Estabelecimento Penal', 'Valor Orçado', 'Valor Gasto (Aprov.)', 'Valor Reservado (Pend.)', 'Saldo Disponível', '% Exec.']],
           body: [
             ...orcadoGastoData.map(r => [
+              cicloNome,
               r.nome,
               fmt(r.total_orcado),
               fmt(r.valor_gasto),
@@ -655,7 +705,7 @@ export const Relatorios: React.FC = () => {
               fmt(r.saldo),
               `${r.pct_executado.toFixed(1)}%`,
             ]),
-            ['TOTAL GERAL', fmt(totalOrcado), fmt(totalGasto), fmt(totalReservado), fmt(totalOrcado - totalGasto - totalReservado), '—'],
+            ['', 'TOTAL GERAL', fmt(totalOrcado), fmt(totalGasto), fmt(totalReservado), fmt(totalOrcado - totalGasto - totalReservado), '—'],
           ],
           headStyles: { fillColor: [30, 58, 138], textColor: 255, fontSize: 8, fontStyle: 'bold' },
           bodyStyles: { fontSize: 8 },
@@ -672,9 +722,10 @@ export const Relatorios: React.FC = () => {
         const totalAprovado = detalhEstData.reduce((s, r) => s + r.valor_aprovado, 0);
         autoTable(doc, {
           startY: 36,
-          head: [['Estabelecimento Penal', 'Servidor', 'Cargo', 'Tipo', 'Data / Período', 'Valor Aprovado']],
+          head: [['Ciclo', 'Estabelecimento Penal', 'Servidor', 'Cargo', 'Tipo', 'Data / Período', 'Valor Aprovado']],
           body: [
             ...detalhEstData.map(r => [
+              cicloNome,
               r.nome_est,
               r.nome_servidor,
               r.position_codigo,
@@ -682,7 +733,7 @@ export const Relatorios: React.FC = () => {
               r.data_detalhe,
               fmt(r.valor_aprovado),
             ]),
-            ['TOTAL GERAL', '', '', '', '', fmt(totalAprovado)],
+            ['', 'TOTAL GERAL', '', '', '', '', fmt(totalAprovado)],
           ],
           headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 8, fontStyle: 'bold' },
           bodyStyles: { fontSize: 8 },
@@ -698,9 +749,10 @@ export const Relatorios: React.FC = () => {
         const totalPagar = folhaFiltered.reduce((s, r) => s + r.total_a_pagar, 0);
         autoTable(doc, {
           startY: 36,
-          head: [['Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Data(s) Plantão', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR']],
+          head: [['Ciclo', 'Matrícula', 'Servidor', 'Cargo', 'Estabelecimento', 'Data(s) Plantão', 'Horas Trab.', 'Plant. Trab.', 'Folgas Ger.', 'Folgas Comp.', 'Plant. Plus', 'Vl. Folga Comp.', 'Vl. Plant. Plus', 'TOTAL A PAGAR']],
           body: [
             ...folhaFiltered.map(r => [
+              cicloNome,
               r.matricula,
               r.nome,
               r.cargo_codigo,
@@ -715,12 +767,12 @@ export const Relatorios: React.FC = () => {
               fmt(r.valor_plantao_plus),
               fmt(r.total_a_pagar),
             ]),
-            ['', 'TOTAL GERAL', '', '', '', '', '', '', '', '', '', '', fmt(totalPagar)],
+            ['', '', 'TOTAL GERAL', '', '', '', '', '', '', '', '', '', '', fmt(totalPagar)],
           ],
           headStyles: { fillColor: [124, 58, 237], textColor: 255, fontSize: 7, fontStyle: 'bold' },
           bodyStyles: { fontSize: 7 },
           alternateRowStyles: { fillColor: [245, 243, 255] },
-          columnStyles: { 12: { fontStyle: 'bold', textColor: [5, 150, 105] } },
+          columnStyles: { 13: { fontStyle: 'bold', textColor: [5, 150, 105] } },
           didParseCell: (data) => {
             if (data.row.index === folhaFiltered.length) {
               data.cell.styles.fontStyle = 'bold';
