@@ -14,6 +14,8 @@ type FolgaDisponivel = {
   periodo_fim: string;
   quantidade_plantoes: number;
   status: string;
+  cycle_id: string;
+  cycles?: { nome: string } | null;
   employees: {
     id: string;
     nome: string;
@@ -148,17 +150,22 @@ export const Solicitacoes: React.FC = () => {
       if (cycleData) {
         setActiveCycle(cycleData);
         
-        // 2. Busca folgas disponíveis (GERADAS)
+        // 2. Busca folgas disponíveis (GERADAS) — de QUALQUER ciclo, não só o ativo.
+        // Antes filtrava por `cycle_id = ciclo ativo`, o que escondia pra sempre qualquer
+        // folga gerada num ciclo anterior e nunca comprada/usufruída antes dele fechar/virar
+        // — o direito continuava GERADA no banco, só sumia da tela. cycle_id aqui é só o
+        // registro histórico de quando foi gerada (mostrado como tag na UI); a compra em si
+        // sempre usa o ciclo ATIVO no momento da compra (ver handleComprar/handleBulkComprarForm).
         const { data: folgas } = await supabase
           .from('compensatory_days')
           .select(`
-            id, periodo_inicio, periodo_fim, quantidade_plantoes, status,
+            id, periodo_inicio, periodo_fim, quantidade_plantoes, status, cycle_id,
+            cycles ( nome ),
             employees (
               id, nome, matricula,
               positions (id, nome, codigo)
             )
           `)
-          .eq('cycle_id', cycleData.id)
           .eq('status', 'GERADA')
           .order('generated_at', { ascending: false });
         
@@ -1053,7 +1060,7 @@ export const Solicitacoes: React.FC = () => {
 
                 {folgasDisponiveis.length === 0 ? (
                   <div className="blueprint card" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                    Nenhuma folga nova gerada neste ciclo. Vá na tela de "Banco de Folgas" para lançar os plantões.
+                    Nenhuma folga disponível pra compra ou gozo. Vá na tela de "Banco de Folgas" para lançar os plantões.
                   </div>
                 ) : folgasFiltradas.length === 0 ? (
                   <div className="blueprint card" style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
@@ -1077,7 +1084,18 @@ export const Solicitacoes: React.FC = () => {
                           }}
                         />
                         <div>
-                          <strong>{f.employees.nome} ({f.employees.matricula})</strong>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <strong>{f.employees.nome} ({f.employees.matricula})</strong>
+                            {f.cycle_id !== activeCycle?.id && (
+                              <span
+                                className="tag"
+                                title="Folga gerada num ciclo anterior, ainda não comprada nem usufruída"
+                                style={{ background: '#fef3c7', color: '#92400e', fontSize: '10px', fontWeight: 700 }}
+                              >
+                                Origem: {f.cycles?.nome || '—'}
+                              </span>
+                            )}
+                          </div>
                           <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
                             {f.employees.positions.nome} | {f.quantidade_plantoes} plantões
                           </div>
