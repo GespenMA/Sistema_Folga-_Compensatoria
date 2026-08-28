@@ -1069,7 +1069,7 @@ export const Folgas: React.FC = () => {
                           <div style={{ height: '1px', background: 'var(--color-divider)', margin: '4px 0' }} />
                           
                           <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                            <strong>Data do Lançamento:</strong> {new Date(s.created_at).toLocaleDateString('pt-BR')}
+                            <strong>Data do lançamento do ciclo:</strong> {new Date(s.created_at).toLocaleDateString('pt-BR')}
                           </div>
                         </div>
                       )})}
