@@ -16,6 +16,50 @@ type Employee = {
   folgasDisponiveis?: number;
 };
 
+// Metadados visuais (rótulo, cor) de cada status de compensatory_days — usado na aba Folgas
+// e para cruzar, na aba Plantões, se aquele lançamento já fechou alguma folga e o que
+// aconteceu com ela (disponível / em aprovação / indenizada / usufruída).
+const folgaStatusMeta = (status: string) => {
+  switch (status) {
+    case 'GERADA': return { label: '✅ Disponível para uso', bg: 'rgba(16,185,129,0.1)', color: '#10b981' };
+    case 'INDENIZACAO_SOLICITADA': return { label: '⏳ Indenização em aprovação', bg: 'rgba(234,179,8,0.1)', color: '#eab308' };
+    case 'INDENIZADA': return { label: '💰 Indenizada', bg: 'rgba(59,130,246,0.1)', color: '#3b82f6' };
+    case 'USUFRUIDA': return { label: '🏖️ Usufruída', bg: 'rgba(239,68,68,0.1)', color: '#ef4444' };
+    default: return { label: status, bg: 'rgba(239,68,68,0.1)', color: '#ef4444' };
+  }
+};
+
+// Uma pessoa escalada num dia do ciclo — Plantão Plus (turno extra) ou Folga Comprada
+// (indenização de folga já ganha), com solicitação Aprovada ou Aguardando Aprovação.
+type EscaladoNoDia = {
+  nome: string;
+  matricula: string;
+  cargo: string;
+  tipo: 'PLANTAO_PLUS' | 'FOLGA_COMPENSATORIA';
+  status: string;
+};
+
+// Grade de dias alinhada por semana (domingo a sábado) cobrindo o período do ciclo, com dias
+// de fora do ciclo nas pontas pra completar as semanas — como um calendário normal.
+const getCalendarGridDays = (dataInicio: string, dataFim: string): Date[] => {
+  const start = new Date(dataInicio + 'T12:00:00');
+  const end = new Date(dataFim + 'T12:00:00');
+  const gridStart = new Date(start);
+  gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  const gridEnd = new Date(end);
+  gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+  const days: Date[] = [];
+  const cur = new Date(gridStart);
+  while (cur <= gridEnd) {
+    days.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return days;
+};
+
+const toDateKey = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 export const Folgas: React.FC = () => {
   const { profile } = useAuth();
   const navigate = useNavigate();
@@ -69,6 +113,14 @@ export const Folgas: React.FC = () => {
 
   // Plantões Plus pendentes por employee (para badge nos cards)
   const [plusPendentes, setPlusPendentes] = useState<Record<string, number>>({});
+
+  // Calendário de Escalas: quem já está Aprovado ou Aguardando Aprovação em cada dia do
+  // ciclo (Plantão Plus ou Folga Comprada), pra evitar escalar alguém a mais no mesmo dia.
+  // É uma visão alternativa à lista de servidores, não um painel que abre por cima —
+  // por isso um modo de visualização (troca o conteúdo), não um accordion que empurra tudo.
+  const [viewMode, setViewMode] = useState<'lista' | 'calendario'>('lista');
+  const [escalaPorDia, setEscalaPorDia] = useState<Map<string, EscaladoNoDia[]>>(new Map());
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<string | null>(null);
 
 
 
@@ -155,7 +207,7 @@ export const Folgas: React.FC = () => {
           .maybeSingle(),
         supabase
           .from('purchase_requests')
-          .select('valor, status')
+          .select('valor, status, data_plantao, tipo_solicitacao, employees(nome, matricula, positions(nome, codigo))')
           .eq('cycle_id', cycleId)
           .eq('establishment_id', profile!.establishment_id)
           .in('status', ['SOLICITADA', 'APROVADA']),
@@ -168,6 +220,23 @@ export const Folgas: React.FC = () => {
       setTotalOrcado(orcado);
       setTotalAprovado(aprovado);
       setTotalPendente(pendente);
+
+      // Mesma consulta alimenta o Calendário de Escalas: agrupa por data_plantao quem já
+      // está Aprovado ou Aguardando Aprovação naquele dia.
+      const porDia = new Map<string, EscaladoNoDia[]>();
+      (comprometidos || []).forEach((r: any) => {
+        if (!r.data_plantao) return;
+        const lista = porDia.get(r.data_plantao) || [];
+        lista.push({
+          nome: r.employees?.nome || '—',
+          matricula: r.employees?.matricula || '—',
+          cargo: r.employees?.positions?.nome || '—',
+          tipo: r.tipo_solicitacao,
+          status: r.status,
+        });
+        porDia.set(r.data_plantao, lista);
+      });
+      setEscalaPorDia(porDia);
 
       return roundCents(orcado - aprovado - pendente);
     } catch (err) {
@@ -226,7 +295,7 @@ export const Folgas: React.FC = () => {
       // Busca plantões do servidor (todas as entradas de saldo)
       const { data: shiftsData } = await supabase
         .from('shifts')
-        .select('id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome)')
+        .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome)')
         .eq('employee_id', emp.id)
         .order('created_at', { ascending: false });
       if (shiftsData) setDetailShifts(shiftsData);
@@ -234,7 +303,7 @@ export const Folgas: React.FC = () => {
       // Busca folgas geradas
       const { data: folgasData } = await supabase
         .from('compensatory_days')
-        .select('id, status, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(data_plantao)')
+        .select('id, status, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(data_plantao)')
         .eq('employee_id', emp.id)
         .order('generated_at', { ascending: false });
       if (folgasData) setDetailFolgas(folgasData);
@@ -266,8 +335,8 @@ export const Folgas: React.FC = () => {
     e.preventDefault();
     if (!profile?.establishment_id || !activeCycle) return;
 
-    if (plusDataPlantao > activeCycle.data_fim) {
-      showToast(`A data do plantão não pode ultrapassar o encerramento do ciclo atual.`, 'warning');
+    if (plusDataPlantao < activeCycle.data_inicio || plusDataPlantao > activeCycle.data_fim) {
+      showToast(`A data do plantão precisa estar dentro do ciclo vigente (${new Date(activeCycle.data_inicio + 'T12:00:00').toLocaleDateString('pt-BR')} a ${new Date(activeCycle.data_fim + 'T12:00:00').toLocaleDateString('pt-BR')}).`, 'warning');
       return;
     }
     if (plusJustificativa.length < 50) {
@@ -443,8 +512,20 @@ export const Folgas: React.FC = () => {
         </div>
         {activeCycle && (
           <div style={{ display: 'flex', gap: '12px' }}>
-            <button 
-              onClick={() => navigate('/estabelecimento/solicitacoes')} 
+            <button
+              onClick={() => setViewMode(v => v === 'calendario' ? 'lista' : 'calendario')}
+              style={{
+                padding: '0 16px', background: viewMode === 'calendario' ? 'var(--color-primary)' : 'var(--color-surface)',
+                color: viewMode === 'calendario' ? '#fff' : 'var(--color-text)', border: `1px solid ${viewMode === 'calendario' ? 'var(--color-primary)' : 'var(--color-divider)'}`,
+                borderRadius: '4px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
+                transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+              }}
+            >
+              <span style={{ fontSize: '16px' }}>{viewMode === 'calendario' ? '👥' : '📅'}</span>
+              {viewMode === 'calendario' ? 'Ver Lista de Servidores' : 'Calendário de Escalas'}
+            </button>
+            <button
+              onClick={() => navigate('/estabelecimento/solicitacoes')}
               style={{ padding: '0 16px', background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-divider)', borderRadius: '4px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-primary)'; e.currentTarget.style.color = 'var(--color-primary)'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-divider)'; e.currentTarget.style.color = 'var(--color-text)'; }}
@@ -500,6 +581,110 @@ export const Folgas: React.FC = () => {
             </div>
           </div>
 
+          {/* Calendário de Escalas: visão do ciclo inteiro, dia a dia, com quem já está
+              Aprovado ou Aguardando Aprovação (Plantão Plus ou Folga Comprada) — pra não
+              escalar alguém a mais no mesmo dia sem perceber. */}
+          {viewMode === 'calendario' && (
+            <div className="blueprint card elev-sm" style={{ padding: 'var(--space-5)', marginBottom: '24px', background: 'var(--color-surface)' }}>
+              <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <h3 style={{ margin: 0 }}>📅 Calendário de Escalas — {activeCycle.nome}</h3>
+                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                  Conta solicitações <strong>Aprovadas</strong> e <strong>Aguardando Aprovação</strong>
+                </div>
+              </div>
+
+              {/* Detalhe do dia selecionado: lista com nome, cargo, tipo e status de cada
+                  servidor escalado — fica acima da grade, não precisa rolar pra ver. */}
+              {selectedCalendarDay && (
+                <div style={{ marginBottom: '16px', padding: '14px 16px', borderRadius: '8px', background: 'var(--color-bg)', border: '1px solid var(--color-divider)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <strong style={{ fontSize: '13px' }}>
+                      {new Date(selectedCalendarDay + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+                    </strong>
+                    <button className="btn btn-ghost" style={{ padding: '2px 8px', fontSize: '12px' }} onClick={() => setSelectedCalendarDay(null)}>Fechar</button>
+                  </div>
+                  {(escalaPorDia.get(selectedCalendarDay) || []).length === 0 ? (
+                    <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Ninguém escalado neste dia ainda.</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {(escalaPorDia.get(selectedCalendarDay) || []).map((e, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--color-surface)', borderRadius: '6px', fontSize: '13px' }}>
+                          <div>
+                            <strong>{e.nome}</strong> <span style={{ color: 'var(--color-text-muted)' }}>({e.matricula})</span>
+                            <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{e.cargo}</div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: e.tipo === 'PLANTAO_PLUS' ? 'var(--color-primary)' : '#10b981' }}>
+                              {e.tipo === 'PLANTAO_PLUS' ? '⚡ Plantão Plus' : '🎉 Folga Comprada'}
+                            </span>
+                            <span style={{
+                              fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
+                              background: e.status === 'APROVADA' ? 'rgba(16,185,129,0.15)' : 'rgba(234,179,8,0.15)',
+                              color: e.status === 'APROVADA' ? '#10b981' : '#b45309'
+                            }}>
+                              {e.status === 'APROVADA' ? 'Aprovada' : 'Aguardando'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', marginBottom: '6px' }}>
+                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
+                  <div key={d} style={{ textAlign: 'center', fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', padding: '4px 0' }}>{d}</div>
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+                {(() => {
+                  const hojeKey = toDateKey(new Date());
+                  return getCalendarGridDays(activeCycle.data_inicio, activeCycle.data_fim).map(d => {
+                    const key = toDateKey(d);
+                    const dentroDoCiclo = key >= activeCycle.data_inicio && key <= activeCycle.data_fim;
+                    const escalados = escalaPorDia.get(key) || [];
+                    const temEscalados = dentroDoCiclo && escalados.length > 0;
+                    const isSelected = selectedCalendarDay === key;
+                    const ehHoje = key === hojeKey;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => dentroDoCiclo && setSelectedCalendarDay(prev => prev === key ? null : key)}
+                        disabled={!dentroDoCiclo}
+                        style={{
+                          minHeight: '58px',
+                          border: `1px solid ${isSelected ? 'var(--color-primary)' : temEscalados ? '#10b981' : 'var(--color-divider)'}`,
+                          borderRadius: '6px', padding: '4px',
+                          background: !dentroDoCiclo ? 'transparent' : isSelected ? 'rgba(59,130,246,0.15)' : temEscalados ? 'rgba(16,185,129,0.15)' : 'var(--color-bg)',
+                          boxShadow: ehHoje ? 'inset 0 0 0 2px var(--color-primary)' : 'none',
+                          cursor: dentroDoCiclo ? 'pointer' : 'default', opacity: dentroDoCiclo ? 1 : 0.25,
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px'
+                        }}
+                      >
+                        <span style={{ fontSize: '12px', fontWeight: ehHoje ? 800 : 600, color: ehHoje ? 'var(--color-primary)' : 'var(--color-text)' }}>
+                          {d.getDate()}
+                        </span>
+                        {temEscalados && (
+                          <span style={{
+                            fontSize: '10px', fontWeight: 700, padding: '0 6px', borderRadius: '10px',
+                            background: '#10b981', color: '#fff'
+                          }}>
+                            {escalados.length}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          )}
+
+          {viewMode === 'lista' && (
+          <>
           {/* Busca + Filtros Rápidos + Cargo + Ordenação */}
           <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
             <input
@@ -736,6 +921,8 @@ export const Folgas: React.FC = () => {
           <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '16px', textAlign: 'center' }}>
             ℹ️ Clique em um servidor para ver o extrato completo. Use ⚡ para lançar Plantão Plus direto do card.
           </div>
+          </>
+          )}
         </>
       )}
 
@@ -819,13 +1006,14 @@ export const Folgas: React.FC = () => {
 
               <div className="field" style={{ marginBottom: 'var(--space-3)' }}>
                 <label>Data do Plantão Extraordinário *</label>
-                <input 
-                  className="input" 
-                  type="date" 
-                  value={plusDataPlantao} 
+                <input
+                  className="input"
+                  type="date"
+                  value={plusDataPlantao}
+                  min={activeCycle?.data_inicio}
                   max={activeCycle?.data_fim}
-                  onChange={(e) => setPlusDataPlantao(e.target.value)} 
-                  required 
+                  onChange={(e) => setPlusDataPlantao(e.target.value)}
+                  required
                 />
               </div>
 
@@ -973,10 +1161,10 @@ export const Folgas: React.FC = () => {
                             </div>
                             <span style={{
                               padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, display: 'inline-block',
-                              background: f.status === 'GERADA' ? 'rgba(16,185,129,0.1)' : f.status === 'INDENIZACAO_SOLICITADA' ? 'rgba(234,179,8,0.1)' : f.status === 'INDENIZADA' ? 'rgba(59,130,246,0.1)' : 'rgba(239,68,68,0.1)',
-                              color: f.status === 'GERADA' ? '#10b981' : f.status === 'INDENIZACAO_SOLICITADA' ? '#eab308' : f.status === 'INDENIZADA' ? '#3b82f6' : '#ef4444'
+                              background: folgaStatusMeta(f.status).bg,
+                              color: folgaStatusMeta(f.status).color
                             }}>
-                              {f.status === 'GERADA' ? '✅ Disponível para uso' : f.status === 'INDENIZACAO_SOLICITADA' ? '⏳ Indenização em aprovação' : f.status === 'INDENIZADA' ? '💰 Indenizada' : f.status === 'USUFRUIDA' ? '🏖️ Usufruída' : f.status}
+                              {folgaStatusMeta(f.status).label}
                             </span>
                           </div>
                           
@@ -1028,51 +1216,152 @@ export const Folgas: React.FC = () => {
                       </div>
                       {detailShifts.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhum plantão registrado.</div>
-                      ) : detailShifts.map((s: any) => {
-                        const workedTotalMinutes = (s.quantidade_plantoes * 720) + (s.minutos_residuais || 0);
-                        const workedHours = Math.floor(workedTotalMinutes / 60);
-                        const workedMinutes = workedTotalMinutes % 60;
+                      ) : (() => {
+                        // O banco recalcula o saldo do ZERO a cada importação (soma histórica de
+                        // plantões menos folgas já geradas × 21) — não é um acúmulo lançamento a
+                        // lançamento. Pra mostrar corretamente "quantos plantões sobraram depois
+                        // deste lançamento específico", reconstruímos essa mesma conta aqui,
+                        // andando pelos lançamentos em ordem cronológica real.
+                        const chronoAsc = [...detailShifts].sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                        const saldoAposShift = new Map<string, { plantoesRestantes: number; folgasGeradas: any[] }>();
+                        let cumulativoPlantoes = 0;
+                        let folgasContadas = 0;
+                        const proximoCicloNome = new Map<string, string>();
+                        chronoAsc.forEach((s: any, i: number) => {
+                          cumulativoPlantoes += s.quantidade_plantoes;
+                          const folgasDesteCiclo = detailFolgas.filter((f: any) => f.cycle_id === s.cycle_id);
+                          folgasContadas += folgasDesteCiclo.length;
+                          saldoAposShift.set(s.id, { plantoesRestantes: cumulativoPlantoes - (folgasContadas * 21), folgasGeradas: folgasDesteCiclo });
+                          if (i < chronoAsc.length - 1) proximoCicloNome.set(s.id, chronoAsc[i + 1].cycles?.nome || 'o lançamento seguinte');
+                        });
+
                         return (
-                        <div key={s.id} style={{
-                          padding: '16px', marginBottom: '12px', borderRadius: '8px',
-                          background: 'var(--color-bg)', border: '1px solid var(--color-divider)',
-                          display: 'flex', flexDirection: 'column', gap: '8px'
-                        }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div style={{ fontWeight: 700, fontSize: '16px', color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span>⏱️</span> Carga Horária Informada
-                            </div>
-                            <span style={{ fontWeight: 800, color: 'var(--color-primary)', fontSize: '20px' }}>
-                              {workedHours}h {String(workedMinutes).padStart(2, '0')}m
-                            </span>
-                          </div>
-
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
-                            <div>
-                              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Ciclo / Período</div>
-                              <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text)' }}>{s.cycles?.nome || 'Importação Base'}</div>
-                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{new Date(s.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(s.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}</div>
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>Conversão de Acúmulo</div>
-                              <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--color-text)' }}>+{s.quantidade_plantoes} Plantões Inteiros</div>
-                              <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Saldo guardado (Sobra): {Math.floor((s.minutos_residuais || 0)/60)}h {String((s.minutos_residuais || 0)%60).padStart(2,'0')}m</div>
-                            </div>
-                          </div>
-
-                          {s.observacao && (
-                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: '4px', fontStyle: 'italic', marginTop: '4px' }}>
-                              {s.observacao}
-                            </div>
+                        <div style={{ position: 'relative', paddingLeft: '22px' }}>
+                          {/* Fio conectando os lançamentos: a "sobra" de um mês é literalmente
+                              parte do total do próximo — o fio deixa esse encadeamento visível,
+                              em vez de cada card parecer um evento isolado. */}
+                          {detailShifts.length > 1 && (
+                            <div style={{ position: 'absolute', left: '3px', top: '14px', bottom: '14px', width: '2px', background: 'var(--color-divider)' }} />
                           )}
-                          
-                          <div style={{ height: '1px', background: 'var(--color-divider)', margin: '4px 0' }} />
-                          
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                            <strong>Data do lançamento do ciclo:</strong> {new Date(s.created_at).toLocaleDateString('pt-BR')}
-                          </div>
+                          {detailShifts.map((s: any, idx: number) => {
+                            const workedTotalMinutes = (s.quantidade_plantoes * 720) + (s.minutos_residuais || 0);
+                            const workedHours = Math.floor(workedTotalMinutes / 60);
+                            const workedMinutes = workedTotalMinutes % 60;
+                            const ehMaisRecente = idx === 0;
+                            const info = saldoAposShift.get(s.id)!;
+                            // Pro lançamento mais recente, usa o saldo AO VIVO gravado no
+                            // servidor (fonte da verdade) em vez da reconstrução — os dois batem,
+                            // mas o valor ao vivo não depende de nenhum cálculo feito aqui.
+                            const plantoesRestantes = ehMaisRecente ? (selectedEmployee?.saldo_plantoes || 0) : info.plantoesRestantes;
+                            const minutosRestantes = ehMaisRecente ? (selectedEmployee?.saldo_minutos || 0) : (s.minutos_residuais || 0);
+                            return (
+                            <div key={s.id} style={{ position: 'relative', marginBottom: '14px' }}>
+                              <div style={{
+                                position: 'absolute', left: '-22px', top: '18px', width: '8px', height: '8px', borderRadius: '50%',
+                                background: 'var(--color-primary)', boxShadow: '0 0 0 3px var(--color-surface)'
+                              }} />
+                              <div style={{
+                                padding: '14px 16px', borderRadius: '8px',
+                                background: ehMaisRecente ? 'rgba(59,130,246,0.04)' : 'var(--color-bg)',
+                                border: ehMaisRecente ? '1px solid rgba(59,130,246,0.3)' : '1px solid var(--color-divider)',
+                                borderLeft: ehMaisRecente ? '3px solid var(--color-primary)' : '1px solid var(--color-divider)'
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '8px', flexWrap: 'wrap' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text)' }}>
+                                      ⏱️ {s.cycles?.nome || 'Importação Base'}
+                                    </span>
+                                    {ehMaisRecente && (
+                                      <span style={{ fontSize: '9px', fontWeight: 800, letterSpacing: '0.4px', padding: '1px 6px', borderRadius: '10px', background: 'var(--color-primary)', color: '#fff' }}>
+                                        ATUAL
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                    {new Date(s.periodo_inicio + 'T12:00:00Z').toLocaleDateString('pt-BR')} a {new Date(s.periodo_fim + 'T12:00:00Z').toLocaleDateString('pt-BR')}
+                                  </div>
+                                </div>
+
+                                {/* Equação de entrada: horas consideradas (novas + o que já
+                                    vinha acumulado) → quantos plantões inteiros isso fechou.
+                                    O que aconteceu com esses plantões e o que sobrou viram
+                                    blocos separados logo abaixo, em vez de tudo na mesma linha. */}
+                                <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: '6px' }}>
+                                  <span style={{ fontSize: '19px', fontWeight: 800, color: 'var(--color-text)' }}>
+                                    {workedHours}h {String(workedMinutes).padStart(2, '0')}m
+                                  </span>
+                                  <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>consideradas</span>
+                                  <span style={{ fontSize: '15px', color: 'var(--color-text-muted)' }}>→</span>
+                                  <span style={{ fontSize: '19px', fontWeight: 800, color: 'var(--color-primary)' }}>
+                                    {s.quantidade_plantoes}
+                                  </span>
+                                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-primary)' }}>
+                                    plantõe{s.quantidade_plantoes === 1 ? '' : 's'} inteiro{s.quantidade_plantoes === 1 ? '' : 's'}
+                                  </span>
+                                </div>
+
+                                {/* Dois blocos lado a lado: (1) o que aconteceu com os plantões
+                                    dessa entrada — cruzando com a aba Folgas pelo mesmo cycle_id
+                                    — e (2) o que sobrou e segue acumulando pro próximo ciclo. São
+                                    as duas perguntas que o operador faz e que antes ficavam
+                                    misturadas numa única linha de texto. */}
+                                <div style={{ height: '1px', background: 'var(--color-divider)', margin: '12px 0' }} />
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                                  <div>
+                                    <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: '4px' }}>Gerou</div>
+                                    {info.folgasGeradas.length === 0 ? (
+                                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Ainda acumulando — nenhuma folga fechada neste lançamento</div>
+                                    ) : (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                                        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-text)' }}>
+                                          {info.folgasGeradas.length * 21} plantões consumidos
+                                        </div>
+                                        {info.folgasGeradas.map((f: any) => {
+                                          const meta = folgaStatusMeta(f.status);
+                                          return (
+                                            <span key={f.id} style={{
+                                              padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                                              background: meta.bg, color: meta.color
+                                            }}>
+                                              🎉 {meta.label}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: '4px' }}>
+                                      {ehMaisRecente ? 'Saldo restante (atual)' : 'Saldo que sobrou'}
+                                    </div>
+                                    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
+                                      {plantoesRestantes > 0 && <>{plantoesRestantes} plantõe{plantoesRestantes === 1 ? '' : 's'} + </>}
+                                      {Math.floor(minutosRestantes / 60)}h {String(minutosRestantes % 60).padStart(2, '0')}m
+                                    </div>
+                                    <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                      {ehMaisRecente ? 'rumo à próxima folga' : `foi para ${proximoCicloNome.get(s.id) || 'o lançamento seguinte'}`}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {s.observacao && (
+                                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: '4px', fontStyle: 'italic', marginTop: '10px' }}>
+                                    {s.observacao}
+                                  </div>
+                                )}
+
+                                <div style={{ height: '1px', background: 'var(--color-divider)', margin: '10px 0' }} />
+
+                                <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                                  Lançado no ciclo em {new Date(s.created_at).toLocaleDateString('pt-BR')}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                          })}
                         </div>
-                      )})}
+                        );
+                      })()}
                     </div>
                   )}
 
