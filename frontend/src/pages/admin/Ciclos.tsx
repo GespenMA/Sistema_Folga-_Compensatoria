@@ -190,7 +190,13 @@ export const Ciclos: React.FC = () => {
   };
 
   const handleCloneBudget = (newCycleId: string) => {
-    const oldCycle = ciclos.find(c => c.id !== newCycleId);
+    // ciclos vem ordenado cronologicamente crescente (ano/mes ASC) — o "ciclo anterior" é o
+    // que fica imediatamente antes deste no array, não simplesmente "qualquer outro ciclo".
+    // `.find(c => c.id !== newCycleId)` pegava sempre o mais ANTIGO de todos os ciclos do
+    // sistema (o primeiro do array), o que só coincidia com o certo enquanto existiam poucos
+    // ciclos cadastrados.
+    const idx = ciclos.findIndex(c => c.id === newCycleId);
+    const oldCycle = idx > 0 ? ciclos[idx - 1] : null;
     if (!oldCycle) {
       alert('Não há nenhum ciclo anterior para clonar os limites.');
       return;
@@ -565,13 +571,22 @@ export const Ciclos: React.FC = () => {
                   )}
 
                   {(ciclo.status === 'ABERTO' || ciclo.status === 'REABERTO') && (
-                    <button 
-                      className="btn" 
-                      style={{ gridColumn: 'span 2', fontSize: '13px', background: '#dc2626', color: 'white', fontWeight: 600, border: 'none', borderRadius: '4px', width: '100%', padding: '10px', justifyContent: 'center' }} 
-                      onClick={() => handleCloseCycle(ciclo.id)}
-                    >
-                      🔒 Encerrar Ciclo
-                    </button>
+                    <>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ fontSize: '13px', border: '1px solid #cbd5e1', borderRadius: '4px', width: '100%', justifyContent: 'center' }}
+                        onClick={() => handleCloneBudget(ciclo.id)}
+                      >
+                        📋 Clonar Regras
+                      </button>
+                      <button
+                        className="btn"
+                        style={{ fontSize: '13px', background: '#dc2626', color: 'white', fontWeight: 600, border: 'none', borderRadius: '4px', width: '100%', padding: '10px', justifyContent: 'center' }}
+                        onClick={() => handleCloseCycle(ciclo.id)}
+                      >
+                        🔒 Encerrar Ciclo
+                      </button>
+                    </>
                   )}
                   
                   {ciclo.status === 'FECHADO' && (
