@@ -755,7 +755,7 @@ export const Folgas: React.FC = () => {
               <p style={{ margin: 0 }}>Nenhum servidor encontrado com os filtros aplicados.</p>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 'var(--space-3)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--space-3)' }}>
               {paginatedFiltered.map((emp, idx) => {
                 const temFolga = (emp.folgasDisponiveis || 0) > 0;
                 const totalMinutos = (emp.saldo_plantoes * 720) + (emp.saldo_minutos || 0);
