@@ -184,21 +184,32 @@ export const Solicitacoes: React.FC = () => {
           setFolgasDisponiveis(validas);
         }
 
-        // 2b. Busca folgas usufruidas
+        // 2b. Busca folgas usufruidas — de QUALQUER ciclo, não só o ativo. Mesmo problema
+        // da busca de folgas disponíveis (item 2 acima): cycle_id aqui é só o registro de
+        // quando a folga foi gerada, não de quando foi usufruída. Um "Registrar Gozo" numa
+        // folga de backlog (ver tag "Origem: X" na lista) gravava certinho no banco, mas
+        // sumia da tela — não aparecia mais em "Disponíveis" (correto, já não é mais GERADA)
+        // nem em "Usufruídas" (por causa deste filtro), dando a impressão de que a ação
+        // não tinha feito nada.
         const { data: usufruidas } = await supabase
           .from('compensatory_days')
           .select(`
-            id, used_at, quantidade_plantoes, status,
+            id, used_at, quantidade_plantoes, status, cycle_id,
+            cycles ( nome ),
             employees (
               id, nome, matricula,
               positions (id, nome, codigo)
             )
           `)
-          .eq('cycle_id', cycleData.id)
           .eq('status', 'USUFRUIDA')
           .order('used_at', { ascending: false });
-        
-        if (usufruidas) setFolgasUsufruidas(usufruidas);
+
+        if (usufruidas) {
+          // Mesma defesa contra servidor transferido (RLS de employees bloqueia o embed) já
+          // aplicada na busca de folgas disponíveis.
+          const validas = usufruidas.filter((f: any) => f.employees != null);
+          setFolgasUsufruidas(validas);
+        }
 
         // 3. Busca valores atualizados dos cargos PRIMEIRO para poder recalcular tudo
         const { data: posVals } = await supabase
@@ -1371,7 +1382,7 @@ export const Solicitacoes: React.FC = () => {
                   {folgasUsufruidas.length === 0 ? (
                     <tr>
                       <td colSpan={3} style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
-                        Nenhuma folga usufruída registrada neste ciclo.
+                        Nenhuma folga usufruída registrada.
                       </td>
                     </tr>
                   ) : sortedFolgasUsufruidas.length === 0 ? (
@@ -1385,6 +1396,11 @@ export const Solicitacoes: React.FC = () => {
                       <td style={{ padding: 'var(--space-3)' }}>
                         <div style={{ fontWeight: 500 }}>{f.employees?.nome} ({f.employees?.matricula})</div>
                         <div style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>{f.employees?.positions?.nome}</div>
+                        {f.cycle_id !== activeCycle?.id && (
+                          <span className="tag" style={{ marginTop: '4px', display: 'inline-block', background: '#fef3c7', color: '#92400e', fontSize: '10px', fontWeight: 700 }}>
+                            Origem: {f.cycles?.nome || '—'}
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: 'var(--space-3)' }}>
                         <span style={{ background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontWeight: 600, fontSize: '11px', display: 'inline-block', marginBottom: '4px' }}>
