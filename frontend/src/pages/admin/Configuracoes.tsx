@@ -20,7 +20,7 @@ type ProfileUser = {
 };
 
 export const Configuracoes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'cargos' | 'importacao' | 'tutoriais'>('usuarios');
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'cargos' | 'escalas' | 'importacao' | 'tutoriais'>('usuarios');
   
   // Estados para Usuários
   const [usuarios, setUsuarios] = useState<ProfileUser[]>([]);
@@ -53,6 +53,13 @@ export const Configuracoes: React.FC = () => {
   const [cargoCodigo, setCargoCodigo] = useState('');
   const [cargoValor, setCargoValor] = useState('');
   const [isSubmittingCargo, setIsSubmittingCargo] = useState(false);
+
+  // Estados para Escalas de Trabalho
+  type ScheduleType = { id: string; nome: string; permite_carga_horaria: boolean; qtdServidores: number };
+  type ScheduleAlias = { id: string; texto_bruto: string; schedule_type_id: string };
+  const [scheduleTypes, setScheduleTypes] = useState<ScheduleType[]>([]);
+  const [scheduleAliases, setScheduleAliases] = useState<ScheduleAlias[]>([]);
+  const [loadingEscalas, setLoadingEscalas] = useState(true);
 
   // Estados para Tutoriais
   const [tutoriais, setTutoriais] = useState<any[]>([]);
@@ -99,6 +106,8 @@ export const Configuracoes: React.FC = () => {
       fetchEstabelecimentos();
     } else if (activeTab === 'cargos') {
       fetchCargos();
+    } else if (activeTab === 'escalas') {
+      fetchScheduleTypes();
     } else if (activeTab === 'importacao') {
       fetchActiveCycleForImport();
       fetchKnownEscalaTextos();
@@ -274,6 +283,39 @@ export const Configuracoes: React.FC = () => {
     } finally {
       setLoadingCargos(false);
     }
+  };
+
+  const fetchScheduleTypes = async () => {
+    setLoadingEscalas(true);
+    try {
+      const [{ data: types }, { data: aliases }, { data: emps }] = await Promise.all([
+        supabase.from('schedule_types').select('id, nome, permite_carga_horaria').order('nome'),
+        supabase.from('schedule_type_aliases').select('id, texto_bruto, schedule_type_id').order('texto_bruto'),
+        supabase.from('employees').select('schedule_type_id').eq('ativo', true),
+      ]);
+      const contagem = new Map<string, number>();
+      (emps || []).forEach((e: any) => {
+        if (e.schedule_type_id) contagem.set(e.schedule_type_id, (contagem.get(e.schedule_type_id) || 0) + 1);
+      });
+      setScheduleTypes((types || []).map((t: any) => ({ ...t, qtdServidores: contagem.get(t.id) || 0 })));
+      setScheduleAliases(aliases || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingEscalas(false);
+    }
+  };
+
+  const handleToggleScheduleType = async (id: string, novoValor: boolean) => {
+    const { error } = await supabase.from('schedule_types').update({ permite_carga_horaria: novoValor }).eq('id', id);
+    if (error) { alert(error.message || 'Erro ao atualizar escala.'); return; }
+    fetchScheduleTypes();
+  };
+
+  const handleReassignAlias = async (aliasId: string, novoScheduleTypeId: string) => {
+    const { error } = await supabase.from('schedule_type_aliases').update({ schedule_type_id: novoScheduleTypeId }).eq('id', aliasId);
+    if (error) { alert(error.message || 'Erro ao reatribuir variação.'); return; }
+    fetchScheduleTypes();
   };
 
   const openUserModal = () => {
@@ -802,6 +844,10 @@ export const Configuracoes: React.FC = () => {
           Cargos e Valores
         </label>
         <label className="seg-opt" style={{ padding: 'var(--space-2) var(--space-4)' }}>
+          <input type="radio" name="config-tab" checked={activeTab === 'escalas'} onChange={() => setActiveTab('escalas')} />
+          🕒 Escalas de Trabalho
+        </label>
+        <label className="seg-opt" style={{ padding: 'var(--space-2) var(--space-4)' }}>
           <input type="radio" name="config-tab" checked={activeTab === 'importacao'} onChange={() => setActiveTab('importacao')} />
           📥 Importação Mensal
         </label>
@@ -982,6 +1028,97 @@ export const Configuracoes: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'escalas' && (
+        <div className="blueprint card elev-sm" style={{ overflow: 'hidden' }}>
+          <i className="corner tl"></i><i className="corner tr"></i><i className="corner bl"></i><i className="corner br"></i>
+
+          <div style={{ padding: 'var(--space-4)', borderBottom: '1px solid var(--color-divider)' }}>
+            <div style={{ fontWeight: 600 }}>Escalas de Trabalho</div>
+            <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+              Controle quais escalas (regime de trabalho, coluna "Horário" da planilha) têm acesso às duas modalidades de compra — carga horária acumulada + Plantão Plus. Escalas desabilitadas só têm acesso a Plantão Plus.
+            </div>
+          </div>
+
+          {loadingEscalas ? (
+            <div style={{ padding: 'var(--space-4)' }}>Carregando...</div>
+          ) : scheduleTypes.length === 0 ? (
+            <div style={{ padding: 'var(--space-6)', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+              Nenhuma escala cadastrada ainda — elas são criadas automaticamente durante a importação mensal, a partir da coluna "Horário".
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Escala</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Servidores ativos</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Modalidade</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scheduleTypes.map(st => (
+                  <tr key={st.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500 }}>{st.nome}</td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>{st.qtdServidores}</td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      {st.permite_carga_horaria
+                        ? <span className="tag" style={{ background: 'var(--color-accent-500)', color: 'white' }}>Carga Horária + Plus</span>
+                        : <span className="tag tag-outline">Só Plantão Plus</span>}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right' }}>
+                      <button
+                        className="btn btn-ghost"
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                        onClick={() => handleToggleScheduleType(st.id, !st.permite_carga_horaria)}
+                      >
+                        {st.permite_carga_horaria ? 'Restringir a Só Plus' : 'Habilitar Carga Horária'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {scheduleAliases.length > 0 && (
+            <div style={{ padding: 'var(--space-4)', borderTop: '1px solid var(--color-divider)' }}>
+              <div style={{ fontWeight: 600, marginBottom: '8px' }}>Mapa de variações</div>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '12px' }}>
+                Cada texto exato encontrado na coluna "Horário" das planilhas e a escala a que foi atribuído. Se o agrupamento automático errou algum caso, reatribua aqui.
+              </div>
+              <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
+                    <tr>
+                      <th style={{ padding: '6px 12px', textAlign: 'left', color: 'var(--color-text-muted)' }}>Texto bruto (planilha)</th>
+                      <th style={{ padding: '6px 12px', textAlign: 'left', color: 'var(--color-text-muted)' }}>Escala atribuída</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scheduleAliases.map(al => (
+                      <tr key={al.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
+                        <td style={{ padding: '6px 12px' }}>{al.texto_bruto}</td>
+                        <td style={{ padding: '6px 12px' }}>
+                          <select
+                            value={al.schedule_type_id}
+                            onChange={e => handleReassignAlias(al.id, e.target.value)}
+                            style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--color-border)' }}
+                          >
+                            {scheduleTypes.map(st => (
+                              <option key={st.id} value={st.id}>{st.nome}</option>
+                            ))}
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </div>
       )}
