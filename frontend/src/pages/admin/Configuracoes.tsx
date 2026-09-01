@@ -71,8 +71,8 @@ export const Configuracoes: React.FC = () => {
   // =============================================
   // Estados para Importação Mensal
   // =============================================
-  type PreviewRow = { matricula: string; nome: string; cargo: string; dataAdmissao: string; estabelecimento: string; trabalhadas: string; minutosNovos: number; plantoes: number; minutosResiduo: number; erros: string[] };
-  type ImportResult = { importados: number; atualizados: number; transferidos: number; shiftsInseridos: number; transferenciasDetalhe: string[]; erros: string[] };
+  type PreviewRow = { matricula: string; nome: string; cargo: string; dataAdmissao: string; estabelecimento: string; trabalhadas: string; minutosNovos: number; plantoes: number; minutosResiduo: number; escalaTexto: string; escalaNova: boolean; erros: string[] };
+  type ImportResult = { importados: number; atualizados: number; transferidos: number; shiftsInseridos: number; escalasNovas: number; transferenciasDetalhe: string[]; erros: string[] };
 
   const [activeCycleForImport, setActiveCycleForImport] = useState<{ id: string; nome: string; data_inicio: string; data_fim: string } | null>(null);
   const [loadingImportCycle, setLoadingImportCycle] = useState(false);
@@ -82,6 +82,7 @@ export const Configuracoes: React.FC = () => {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; currentName: string }>({ current: 0, total: 0, currentName: '' });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [knownEscalaTextos, setKnownEscalaTextos] = useState<Set<string>>(new Set());
 
   const filteredUsers = usuarios.filter(u => {
     const matchNome = u.nome.toLowerCase().includes(filterUserNome.toLowerCase()) || u.email.toLowerCase().includes(filterUserNome.toLowerCase());
@@ -100,6 +101,7 @@ export const Configuracoes: React.FC = () => {
       fetchCargos();
     } else if (activeTab === 'importacao') {
       fetchActiveCycleForImport();
+      fetchKnownEscalaTextos();
     } else if (activeTab === 'tutoriais') {
       fetchTutoriais();
     }
@@ -119,6 +121,11 @@ export const Configuracoes: React.FC = () => {
     } finally {
       setLoadingImportCycle(false);
     }
+  };
+
+  const fetchKnownEscalaTextos = async () => {
+    const { data } = await supabase.from('schedule_type_aliases').select('texto_bruto');
+    setKnownEscalaTextos(new Set((data || []).map((a: any) => a.texto_bruto)));
   };
 
   const fetchTutoriais = async () => {
@@ -202,6 +209,19 @@ export const Configuracoes: React.FC = () => {
     const parts = String(str).trim().split(':');
     if (parts.length < 2) return 0;
     return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+  };
+
+  // Agrupa variações de texto da coluna "Horário" que são o mesmo regime de trabalho —
+  // sufixos como "- 002" (turma/grupo) ou "NOTURNO 2" não mudam a regra de acúmulo.
+  // Heurística: corta um sufixo numérico (com ou sem "- " na frente) só se ele estiver
+  // no FINAL da string — não mexe em números no meio (ex: "3 DIAS DE FOLGA" continua
+  // intacto em "04 D X 10 H - 3 DIAS DE FOLGA - 1" → "04 D X 10 H - 3 DIAS DE FOLGA").
+  const normalizarEscala = (textoBruto: string): string => {
+    return textoBruto
+      .trim()
+      .replace(/\s*-\s*\d+\s*$/, '')
+      .replace(/\s+\d+\s*$/, '')
+      .trim();
   };
 
   const fetchEstabelecimentos = async () => {
@@ -485,6 +505,8 @@ export const Configuracoes: React.FC = () => {
         const rawTrabalhadas = r[6] !== undefined ? r[6] : '0:00';
         const trabalhadas = String(rawTrabalhadas);
         const minutosNovos = parseHorasMinutos(rawTrabalhadas);
+        const escalaTexto = String(r[5] || '').trim();
+        const escalaNova = escalaTexto !== '' && !knownEscalaTextos.has(escalaTexto);
         // O preview mostra o cálculo só das horas novas (sem saldo anterior)
         // O saldo anterior é buscado individualmente na confirmação
         const plantoes = Math.floor(minutosNovos / MINUTOS_POR_PLANTAO);
@@ -517,6 +539,8 @@ export const Configuracoes: React.FC = () => {
           minutosNovos,
           plantoes,
           minutosResiduo,
+          escalaTexto,
+          escalaNova,
           erros
         };
       });
@@ -560,6 +584,8 @@ export const Configuracoes: React.FC = () => {
     try {
       const { data: ests } = await supabase.from('establishments').select('id, nome');
       const { data: positions } = await supabase.from('positions').select('id, nome, codigo');
+      const { data: aliases } = await supabase.from('schedule_type_aliases').select('texto_bruto, schedule_type_id');
+      const { data: scheduleTypesData } = await supabase.from('schedule_types').select('id, nome');
 
       const estMap = new Map<string, string>();
       ests?.forEach(e => estMap.set(normalizeStr(e.nome), e.id));
@@ -569,6 +595,14 @@ export const Configuracoes: React.FC = () => {
 
       const posMap = new Map<string, string>();
       positions?.forEach(p => posMap.set(normalizeStr(p.nome), p.id));
+
+      const aliasMap = new Map<string, string>(); // texto_bruto exato -> schedule_type_id
+      aliases?.forEach(a => aliasMap.set(a.texto_bruto, a.schedule_type_id));
+
+      const scheduleTypeByNome = new Map<string, string>(); // nome normalizado -> id
+      scheduleTypesData?.forEach(st => scheduleTypeByNome.set(normalizeStr(st.nome), st.id));
+
+      let escalasNovas = 0;
 
       const MINUTOS_POR_PLANTAO = 720;
       let importados = 0, atualizados = 0, transferidos = 0, shiftsInseridos = 0;
@@ -590,6 +624,41 @@ export const Configuracoes: React.FC = () => {
 
         if (!estId) { erros.push(`Estabelecimento não encontrado: "${row.estabelecimento}" (${row.nome})`); continue; }
         if (!posId) { erros.push(`Cargo não encontrado: "${row.cargo}" (${row.nome})`); continue; }
+
+        // Resolve a escala (coluna "Horário") pro texto_bruto exato desta linha —
+        // cria a escala canônica e o alias se for a primeira vez que esse texto
+        // aparece. Célula vazia não bloqueia a linha, só fica sem escala definida.
+        let scheduleTypeId: string | null = null;
+        if (row.escalaTexto) {
+          scheduleTypeId = aliasMap.get(row.escalaTexto) || null;
+          if (!scheduleTypeId) {
+            const nomeCanonico = normalizarEscala(row.escalaTexto);
+            const nomeCanonicoNorm = normalizeStr(nomeCanonico);
+            scheduleTypeId = scheduleTypeByNome.get(nomeCanonicoNorm) || null;
+            if (!scheduleTypeId) {
+              const { data: newSt, error: stError } = await supabase
+                .from('schedule_types')
+                .insert({ nome: nomeCanonico, permite_carga_horaria: true })
+                .select('id')
+                .single();
+              if (stError || !newSt) {
+                erros.push(`Erro ao criar escala "${nomeCanonico}" (${row.nome}): ${stError?.message}`);
+              } else {
+                scheduleTypeId = newSt.id as string;
+                scheduleTypeByNome.set(nomeCanonicoNorm, scheduleTypeId);
+              }
+            }
+            if (scheduleTypeId) {
+              const { error: aliasError } = await supabase
+                .from('schedule_type_aliases')
+                .insert({ texto_bruto: row.escalaTexto, schedule_type_id: scheduleTypeId });
+              if (!aliasError) {
+                aliasMap.set(row.escalaTexto, scheduleTypeId);
+                escalasNovas++;
+              }
+            }
+          }
+        }
 
         // Busca por matrícula globalmente — matrícula é identificador único do
         // servidor na SEAP, não escopado por estabelecimento. Isso é o que permite
@@ -647,7 +716,8 @@ export const Configuracoes: React.FC = () => {
               position_id: posId,
               ativo: true,
               data_admissao: row.dataAdmissao,
-              saldo_minutos: novoSaldoMinutos
+              saldo_minutos: novoSaldoMinutos,
+              schedule_type_id: scheduleTypeId
             })
             .eq('id', existingEmp.id);
           if (empError) { erros.push(`Erro ao salvar servidor ${row.nome}: ${empError.message}`); continue; }
@@ -662,7 +732,8 @@ export const Configuracoes: React.FC = () => {
               position_id: posId,
               ativo: true,
               data_admissao: row.dataAdmissao,
-              saldo_minutos: novoSaldoMinutos
+              saldo_minutos: novoSaldoMinutos,
+              schedule_type_id: scheduleTypeId
             })
             .select('id')
             .single();
@@ -696,7 +767,7 @@ export const Configuracoes: React.FC = () => {
         }
       }
 
-      setImportResult({ importados, atualizados, transferidos, shiftsInseridos, transferenciasDetalhe, erros });
+      setImportResult({ importados, atualizados, transferidos, shiftsInseridos, escalasNovas, transferenciasDetalhe, erros });
       setImportStep('done');
     } catch (err: any) {
       alert('Erro durante a importação: ' + (err.message || err));
@@ -989,7 +1060,7 @@ export const Configuracoes: React.FC = () => {
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                         <thead style={{ background: '#f8fafc', position: 'sticky', top: 0 }}>
                           <tr>
-                            {['Matrícula','Nome','Cargo','Estabelecimento','Trabalhadas','Plantões','Saldo Residual'].map(h => (
+                            {['Matrícula','Nome','Cargo','Estabelecimento','Escala','Trabalhadas','Plantões','Saldo Residual'].map(h => (
                               <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-divider)' }}>{h}</th>
                             ))}
                           </tr>
@@ -1001,6 +1072,21 @@ export const Configuracoes: React.FC = () => {
                               <td style={{ padding: '7px 12px' }}>{row.nome}</td>
                               <td style={{ padding: '7px 12px', fontSize: '11px' }}>{row.cargo}</td>
                               <td style={{ padding: '7px 12px', fontSize: '11px' }}>{row.estabelecimento}</td>
+                              <td style={{ padding: '7px 12px', fontSize: '11px' }}>
+                                {row.escalaTexto ? (
+                                  <>
+                                    <div>{normalizarEscala(row.escalaTexto)}</div>
+                                    {normalizarEscala(row.escalaTexto) !== row.escalaTexto && (
+                                      <div style={{ fontSize: '9px', color: 'var(--color-text-muted)' }}>de: {row.escalaTexto}</div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span style={{ color: 'var(--color-text-muted)' }}>— sem escala</span>
+                                )}
+                                {row.escalaNova && (
+                                  <span className="tag" style={{ marginLeft: '6px', fontSize: '9px', padding: '1px 6px', background: '#fef3c7', color: '#92400e' }}>🆕 nova</span>
+                                )}
+                              </td>
                               <td style={{ padding: '7px 12px', textAlign: 'center' }}>
                                 {/* O cálculo já está certo (minutosNovos vem de parseHorasMinutos, que trata
                                     o valor do Excel como fração de dias); só a exibição mostrava o decimal
@@ -1079,6 +1165,12 @@ export const Configuracoes: React.FC = () => {
                         <div style={{ fontSize: '12px', color: '#a16207', marginTop: '4px' }}>Registros de Plantões</div>
                       </div>
                     </div>
+
+                    {importResult.escalasNovas > 0 && (
+                      <div style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#1e40af' }}>
+                        🕒 <strong>{importResult.escalasNovas}</strong> variação(ões) de "Horário" nunca vista(s) antes viraram escala nova nesta importação. Se você esperava um número bem menor de regimes reais, revise o agrupamento em <strong>Configurações → Escalas de Trabalho</strong> antes de desabilitar qualquer escala.
+                      </div>
+                    )}
 
                     {importResult.transferenciasDetalhe.length > 0 && (
                       <div style={{ background: '#faf5ff', border: '1px solid #d8b4fe', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
