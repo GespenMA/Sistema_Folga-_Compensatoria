@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase, fetchAll } from '../../lib/supabase';
 import { useSearchParams } from 'react-router-dom';
-import { BadgeCheck, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { BadgeCheck, ChevronLeft, ChevronRight, Search, Eye } from 'lucide-react';
+import { ServidorConsultaModal } from '../../components/ServidorConsultaModal';
 
 // Remove caracteres com significado especial na sintaxe de filtro do PostgREST
 // (vírgula separa condições, ponto separa coluna.operador.valor, parênteses
@@ -15,6 +16,11 @@ type Position = {
 };
 
 type Establishment = {
+  id: string;
+  nome: string;
+};
+
+type Cycle = {
   id: string;
   nome: string;
 };
@@ -39,6 +45,7 @@ export const Servidores: React.FC = () => {
   // Combos
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [cycles, setCycles] = useState<Cycle[]>([]);
 
   const [searchParams] = useSearchParams();
 
@@ -46,6 +53,10 @@ export const Servidores: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEst, setSelectedEst] = useState(searchParams.get('est_id') || '');
   const [selectedPos, setSelectedPos] = useState('');
+  const [selectedCycle, setSelectedCycle] = useState('');
+
+  // Modal de consulta (somente leitura)
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   
   // Paginação
   const [page, setPage] = useState(1);
@@ -81,6 +92,9 @@ export const Servidores: React.FC = () => {
 
         const { data: posData } = await supabase.from('positions').select('id, nome').eq('ativo', true).order('nome');
         if (posData) setPositions(posData);
+
+        const { data: cycleData } = await supabase.from('cycles').select('id, nome').order('data_inicio', { ascending: false });
+        if (cycleData) setCycles(cycleData);
       } catch (err) {
         console.error(err);
       }
@@ -88,21 +102,25 @@ export const Servidores: React.FC = () => {
     fetchCombos();
   }, []);
 
-  // Quando mudar filtros (term, est, pos), reseta a paginação
+  // Quando mudar filtros (term, est, pos, ciclo), reseta a paginação
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, selectedEst, selectedPos]);
+  }, [searchTerm, selectedEst, selectedPos, selectedCycle]);
 
   // Busca os dados da tabela
   const fetchServidores = useCallback(async () => {
     setLoading(true);
     try {
+      // shifts!inner só entra na consulta quando o filtro de ciclo está ativo —
+      // é o que restringe a listagem a quem tem lançamento naquele ciclo
+      // específico (servidor em si não é vinculado a ciclo, só os shifts dele).
       let query = supabase
         .from('employees')
         .select(`
           id, matricula, nome, data_admissao, ativo,
           positions (id, nome),
           establishments (id, nome)
+          ${selectedCycle ? ', shifts!inner(cycle_id)' : ''}
         `, { count: 'exact' });
 
       // Aplica filtros
@@ -111,6 +129,9 @@ export const Servidores: React.FC = () => {
       }
       if (selectedPos) {
         query = query.eq('position_id', selectedPos);
+      }
+      if (selectedCycle) {
+        query = query.eq('shifts.cycle_id', selectedCycle);
       }
       if (searchTerm) {
         const term = sanitizeFilterTerm(searchTerm);
@@ -136,13 +157,14 @@ export const Servidores: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, selectedEst, selectedPos, page]);
+  }, [searchTerm, selectedEst, selectedPos, selectedCycle, page]);
 
   const fetchEstatisticas = useCallback(async () => {
     try {
-      let query = supabase.from('employees').select('position_id');
+      let query = supabase.from('employees').select(`position_id${selectedCycle ? ', shifts!inner(cycle_id)' : ''}`);
       if (selectedEst) query = query.eq('establishment_id', selectedEst);
       if (selectedPos) query = query.eq('position_id', selectedPos);
+      if (selectedCycle) query = query.eq('shifts.cycle_id', selectedCycle);
       if (searchTerm) query = query.or(`nome.ilike.%${sanitizeFilterTerm(searchTerm)}%,matricula.ilike.%${sanitizeFilterTerm(searchTerm)}%`);
 
       const data = await fetchAll(query);
@@ -157,7 +179,7 @@ export const Servidores: React.FC = () => {
     } catch (err) {
       console.error('Erro ao buscar estatísticas:', err);
     }
-  }, [searchTerm, selectedEst, selectedPos]);
+  }, [searchTerm, selectedEst, selectedPos, selectedCycle]);
 
   useEffect(() => {
     // Debounce para a busca por termo
@@ -278,13 +300,27 @@ export const Servidores: React.FC = () => {
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
             Cargo
           </label>
-          <select 
-            value={selectedPos} 
-            onChange={(e) => setSelectedPos(e.target.value)} 
+          <select
+            value={selectedPos}
+            onChange={(e) => setSelectedPos(e.target.value)}
             style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
           >
             <option value="">Todos os Cargos</option>
             {positions.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+        </div>
+
+        <div style={{ flex: '1 1 200px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Ciclo
+          </label>
+          <select
+            value={selectedCycle}
+            onChange={(e) => setSelectedCycle(e.target.value)}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          >
+            <option value="">Todos os Ciclos</option>
+            {cycles.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
           </select>
         </div>
       </div>
@@ -308,6 +344,7 @@ export const Servidores: React.FC = () => {
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Cargo</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Estabelecimento Penal</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Consultar</th>
                 </tr>
               </thead>
               <tbody>
@@ -322,9 +359,19 @@ export const Servidores: React.FC = () => {
                       {emp.establishments?.nome || '-'}
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                      {emp.ativo 
-                        ? <span className="tag" style={{ background: '#059669', color: 'white' }}>Ativo</span> 
+                      {emp.ativo
+                        ? <span className="tag" style={{ background: '#059669', color: 'white' }}>Ativo</span>
                         : <span className="tag" style={{ background: '#4b5563', color: 'white' }}>Inativo</span>}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right' }}>
+                      <button
+                        className="btn btn-ghost"
+                        title="Consultar histórico (somente leitura)"
+                        onClick={() => setSelectedEmployeeId(emp.id)}
+                        style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center' }}
+                      >
+                        <Eye size={16} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -364,6 +411,8 @@ export const Servidores: React.FC = () => {
         )}
 
       </div>
+
+      <ServidorConsultaModal employeeId={selectedEmployeeId} onClose={() => setSelectedEmployeeId(null)} />
     </div>
   );
 };
