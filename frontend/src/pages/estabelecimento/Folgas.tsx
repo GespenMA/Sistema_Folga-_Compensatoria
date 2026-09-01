@@ -14,6 +14,8 @@ type Employee = {
   positions?: { nome: string; codigo: string };
   compensatory_days?: { id: string; status: string }[];
   folgasDisponiveis?: number;
+  schedule_type_id?: string | null;
+  schedule_types?: { permite_carga_horaria: boolean } | null;
 };
 
 // Metadados visuais (rótulo, cor) de cada status de compensatory_days — usado na aba Folgas
@@ -250,7 +252,7 @@ export const Folgas: React.FC = () => {
       const [{ data: empData }, { data: plusData }] = await Promise.all([
         supabase
           .from('employees')
-          .select('id, nome, matricula, saldo_plantoes, saldo_minutos, position_id, positions(nome, codigo), compensatory_days(id, status)')
+          .select('id, nome, matricula, saldo_plantoes, saldo_minutos, position_id, positions(nome, codigo), compensatory_days(id, status), schedule_types(permite_carga_horaria)')
           .eq('establishment_id', profile!.establishment_id)
           .eq('ativo', true)
           .order('nome'),
@@ -422,9 +424,12 @@ export const Folgas: React.FC = () => {
   const totalServidores = employees.length;
   const folgasProntas = employees.filter(e => (e.folgasDisponiveis || 0) > 0).length;
   const proximos = employees.filter(e => {
+    if (e.schedule_types?.permite_carga_horaria === false) return false;
     const min = (e.saldo_plantoes * 720) + (e.saldo_minutos || 0);
     return min >= (120 * 60) && (e.folgasDisponiveis || 0) === 0; // >= 120h
   }).length;
+
+  const permiteCargaHorariaDetail = selectedEmployee?.schedule_types?.permite_carga_horaria !== false;
   const totalFolgas = employees.reduce((acc, e) => acc + (e.folgasDisponiveis || 0), 0);
 
   // Lista única de cargos para o filtro
@@ -757,12 +762,13 @@ export const Folgas: React.FC = () => {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--space-3)' }}>
               {paginatedFiltered.map((emp, idx) => {
+                const permiteCarga = emp.schedule_types?.permite_carga_horaria !== false;
                 const temFolga = (emp.folgasDisponiveis || 0) > 0;
                 const totalMinutos = (emp.saldo_plantoes * 720) + (emp.saldo_minutos || 0);
                 const horas = Math.floor(totalMinutos / 60);
                 const minutosStr = String(totalMinutos % 60).padStart(2, '0');
-                
-                const proximo = !temFolga && horas >= 120;
+
+                const proximo = permiteCarga && !temFolga && horas >= 120;
                 const pct = Math.min((totalMinutos / 15120) * 100, 100); // 15120 = 252h = 21 plantoes
                 const corBorda = temFolga ? '#10b981' : proximo ? '#eab308' : 'var(--color-divider)';
                 const plusPendente = plusPendentes[emp.id] || 0;
@@ -808,26 +814,32 @@ export const Folgas: React.FC = () => {
                       </button>
                     </div>
 
-                    {/* Saldo + Barra */}
-                    <div style={{ marginBottom: '10px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
-                        <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Saldo para próxima folga</span>
-                        <span style={{ fontWeight: 800, fontSize: '16px', color: temFolga ? '#10b981' : 'var(--color-text)' }}>
-                          {horas}h {minutosStr}m<span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--color-text-muted)' }}>/252h</span>
-                        </span>
+                    {/* Saldo + Barra — só pra quem tem escala habilitada pra carga horária */}
+                    {permiteCarga ? (
+                      <div style={{ marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Saldo para próxima folga</span>
+                          <span style={{ fontWeight: 800, fontSize: '16px', color: temFolga ? '#10b981' : 'var(--color-text)' }}>
+                            {horas}h {minutosStr}m<span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--color-text-muted)' }}>/252h</span>
+                          </span>
+                        </div>
+                        <div style={{ height: '8px', background: 'var(--color-divider)', borderRadius: '4px', overflow: 'hidden' }}>
+                          <div style={{
+                            height: '100%', borderRadius: '4px', transition: 'width 0.4s ease',
+                            width: `${pct}%`,
+                            background: temFolga
+                              ? 'linear-gradient(90deg, #10b981, #34d399)'
+                              : proximo
+                                ? 'linear-gradient(90deg, #eab308, #f59e0b)'
+                                : 'linear-gradient(90deg, #3b82f6, #60a5fa)'
+                          }} />
+                        </div>
                       </div>
-                      <div style={{ height: '8px', background: 'var(--color-divider)', borderRadius: '4px', overflow: 'hidden' }}>
-                        <div style={{
-                          height: '100%', borderRadius: '4px', transition: 'width 0.4s ease',
-                          width: `${pct}%`,
-                          background: temFolga
-                            ? 'linear-gradient(90deg, #10b981, #34d399)'
-                            : proximo
-                              ? 'linear-gradient(90deg, #eab308, #f59e0b)'
-                              : 'linear-gradient(90deg, #3b82f6, #60a5fa)'
-                        }} />
+                    ) : (
+                      <div style={{ marginBottom: '10px', padding: '8px 10px', background: 'var(--color-bg)', borderRadius: '6px', fontSize: '11px', color: 'var(--color-text-muted)' }}>
+                        ⚡ Escala só Plantão Plus — não acumula carga horária
                       </div>
-                    </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {temFolga && (
@@ -838,7 +850,7 @@ export const Folgas: React.FC = () => {
                           🎉 {emp.folgasDisponiveis} Folga{emp.folgasDisponiveis! > 1 ? 's' : ''} disponível
                         </span>
                       )}
-                      {proximo && (
+                      {permiteCarga && proximo && (
                         <span style={{
                           fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '12px',
                           background: 'rgba(234,179,8,0.12)', color: '#eab308', border: '1px solid rgba(234,179,8,0.25)'
@@ -846,7 +858,7 @@ export const Folgas: React.FC = () => {
                           ⏳ Próximo da folga
                         </span>
                       )}
-                      {!temFolga && !proximo && (
+                      {permiteCarga && !temFolga && !proximo && (
                         <span style={{
                           fontSize: '11px', fontWeight: 600, padding: '3px 10px', borderRadius: '12px',
                           background: 'var(--color-bg)', color: 'var(--color-text-muted)', border: '1px solid var(--color-divider)'
@@ -1085,15 +1097,21 @@ export const Folgas: React.FC = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
                 <div style={{ background: 'var(--color-bg)', borderRadius: '8px', padding: '10px', textAlign: 'center' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '4px' }}>Saldo</div>
-                  <div style={{ fontSize: '20px', fontWeight: 800 }}>
-                    {Math.floor(((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) / 60)}h 
-                    <span style={{ fontSize: '14px', marginLeft: '2px' }}>
-                      {String(((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) % 60).padStart(2, '0')}m
-                    </span>
-                  </div>
-                  <div style={{ height: '4px', background: 'var(--color-divider)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', background: 'var(--color-primary)', width: `${Math.min((((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) / 15120) * 100, 100)}%` }}></div>
-                  </div>
+                  {permiteCargaHorariaDetail ? (
+                    <>
+                      <div style={{ fontSize: '20px', fontWeight: 800 }}>
+                        {Math.floor(((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) / 60)}h
+                        <span style={{ fontSize: '14px', marginLeft: '2px' }}>
+                          {String(((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) % 60).padStart(2, '0')}m
+                        </span>
+                      </div>
+                      <div style={{ height: '4px', background: 'var(--color-divider)', borderRadius: '2px', marginTop: '6px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', background: 'var(--color-primary)', width: `${Math.min((((selectedEmployee.saldo_plantoes * 720) + (selectedEmployee.saldo_minutos || 0)) / 15120) * 100, 100)}%` }}></div>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-text-muted)', marginTop: '10px' }}>⚡ Só Plus</div>
+                  )}
                 </div>
                 <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#10b981', fontWeight: 600, marginBottom: '4px' }}>Folgas</div>
@@ -1140,7 +1158,9 @@ export const Folgas: React.FC = () => {
                   {detailTab === 'folgas' && (
                     <div>
                       <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
-                        Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)
+                        {permiteCargaHorariaDetail
+                          ? 'Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)'
+                          : 'Este servidor está em escala só-Plantão Plus e não acumula carga horária nova. As folgas listadas abaixo (se houver) foram geradas antes dessa configuração e continuam válidas normalmente.'}
                       </div>
                       {detailFolgas.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhuma folga gerada ainda.</div>
@@ -1210,6 +1230,11 @@ export const Folgas: React.FC = () => {
 
                   {/* ABA: Plantões */}
                   {detailTab === 'plantoes' && (
+                    !permiteCargaHorariaDetail ? (
+                      <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>
+                        ⚡ Este servidor está em escala só-Plantão Plus — não acumula carga horária compensatória.
+                      </div>
+                    ) : (
                     <div>
                       <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
                         Este painel detalha as horas contempladas dentro do ciclo atual do servidor. Cada carga horária lançada é somada ao saldo geral, acumulando o tempo exigido para a liberação da próxima folga.
@@ -1363,6 +1388,7 @@ export const Folgas: React.FC = () => {
                         );
                       })()}
                     </div>
+                    )
                   )}
 
                   {/* ABA: Plantão Plus */}
