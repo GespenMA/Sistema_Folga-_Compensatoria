@@ -87,6 +87,8 @@ Em `handleConfirmImport` ([Configuracoes.tsx:529+](../../../frontend/src/pages/a
 3. Se `row.escalaTexto` vazio: `schedule_type_id = null` para o servidor, sem erro bloqueante — só um aviso no preview (mesmo padrão de "Matrícula vazia" etc., [Configuracoes.tsx:505-509](../../../frontend/src/pages/admin/Configuracoes.tsx#L505-L509)).
 4. Gravar `schedule_type_id` no `insert`/`update` de `employees`.
 
+**Resumo pós-importação:** o resultado da importação (mesmo componente que já mostra `importados`/`atualizados`/`transferidos`) ganha um contador `escalasNovas` — quantas linhas de `schedule_type_aliases` foram criadas nessa importação (ou seja, quantos textos brutos da coluna "Horário" nunca tinham sido vistos antes). Isso dá ao admin um número pra conferir de cabeça contra o que ele sabe que existe na prática: se ele espera ~15 regimes reais e o resumo mostra 42 escalas novas criadas de uma vez, é sinal de que a normalização (3.2) não agrupou direito e vale revisar o mapa de variações (3.7) antes de desabilitar qualquer escala. Em importações seguintes, o número tende a cair perto de zero (a maioria dos textos já vira alias reconhecido).
+
 ### 3.4 Trigger de saldo (`trg_recalculate_shift_balance`)
 
 Gate no início da função, antes de qualquer cálculo:
@@ -150,7 +152,8 @@ Nova sub-seção dentro de `Configuracoes.tsx`, mesmo padrão da gestão de Carg
 Não há suíte de testes automatizada no projeto. Antes de implementar: rodar `impact()` do GitNexus sobre `trg_recalculate_shift_balance` (função crítica, compartilhada, dispara em todo INSERT/UPDATE/DELETE de `shifts`) e sobre `fetchData`/`fetchOrcamento` em `Solicitacoes.tsx`/`Folgas.tsx` antes de tocar nelas, e reportar o raio de impacto antes de prosseguir, conforme `CLAUDE.md`.
 
 Verificação manual sugerida após implementar:
-1. Criar uma escala de teste com `permite_carga_horaria = false`, associar um servidor de teste a ela, importar um plantão para ele e confirmar que `saldo_plantoes`/`compensatory_days` não mudam.
-2. Confirmar que a carga horária acumulada não aparece na tela de Lançamento de Plantões para esse servidor, mas o Plantão Plus continua lançável.
-3. Reabilitar a escala, importar um novo plantão, confirmar que o acúmulo volta a valer só a partir desse plantão novo (não retroativo).
-4. Rodar `detect_changes()` antes de commitar, comparando com `main`.
+1. Importar uma planilha de teste com valores variados na coluna "Horário" (incluindo variações tipo "- 002"/"NOTURNO 2") e conferir que o resumo pós-importação (`escalasNovas`) bate com o número esperado de regimes reais distintos, não com o número de textos brutos distintos.
+2. Criar uma escala de teste com `permite_carga_horaria = false`, associar um servidor de teste a ela, importar um plantão para ele e confirmar que `saldo_plantoes`/`compensatory_days` não mudam.
+3. Confirmar que a carga horária acumulada não aparece na tela de Lançamento de Plantões para esse servidor, mas o Plantão Plus continua lançável.
+4. Reabilitar a escala, importar um novo plantão, confirmar que o acúmulo volta a valer só a partir desse plantão novo (não retroativo).
+5. Rodar `detect_changes()` antes de commitar, comparando com `main`.
