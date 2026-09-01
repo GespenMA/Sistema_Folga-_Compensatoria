@@ -650,6 +650,11 @@ Aplicadas manualmente no painel Supabase → SQL Editor, em ordem numérica.
 | `21_valida_valor_solicitacao.sql` | Trigger `validar_solicitacao_compra` passa a **recalcular** o valor esperado a partir de `position_values` (via `valor_historico_id`), em vez de confiar no `valor` enviado pelo cliente — corrige falha de segurança onde um cliente ESTABELECIMENTO podia forjar um valor artificialmente baixo |
 | `22_recalculo_orcamento_preco_cargo.sql` | Corrige `total_orcado` que ficava dessincronizado quando o preço de um cargo mudava em `position_values` sem passar por `planning_limits` |
 | `23_justificativa_max_1000.sql` | Reduz o limite máximo da `justificativa` de `purchase_requests` de 2000 para 1000 caracteres (mínimo continua 50) |
+| `24_auto_reject_pending_on_cycle_close.sql` | Ao fechar um ciclo, rejeita automaticamente `purchase_requests` ainda `SOLICITADA` e abre exceção pontual em `check_cycle_status()` para permitir esse UPDATE mesmo com o ciclo já FECHADO |
+| `25_permite_update_compensatory_days_ciclo_fechado.sql` | `check_cycle_status()` deixa de bloquear UPDATE em `compensatory_days` por ciclo fechado (o `cycle_id` da folga é só histórico, não uma janela de edição) — corrige compra de folgas de backlog que ficavam presas em `GERADA` |
+| `26_escalas_modalidade_compra.sql` | Cria `schedule_types`/`schedule_type_aliases` + `employees.schedule_type_id`; `trg_recalculate_shift_balance` para de acumular saldo para servidores em escala com `permite_carga_horaria = false` |
+| `27_corrige_retroatividade_escala_desabilitada.sql` | Corrige retroatividade indevida da migração 26: adiciona `shifts.conta_para_saldo` (decidido uma vez, na inserção, via trigger `BEFORE INSERT` novo) para que religar uma escala não volte a contar plantões lançados enquanto ela estava desabilitada |
+| `28_restaura_establishment_id_perdido_na_27.sql` | Corrige regressão das migrações 26/27: restaura a propagação de `establishment_id` para `compensatory_days` (introduzida pela migração 18) que tinha sido perdida ao reescrever `trg_recalculate_shift_balance` a partir do corpo original — quebrava a geração automática de folga a cada 21 plantões |
 
 ---
 

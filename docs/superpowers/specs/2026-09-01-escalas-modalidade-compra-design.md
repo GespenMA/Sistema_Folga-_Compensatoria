@@ -1,6 +1,6 @@
 # Design: Elegibilidade de escala para modalidade de compra de plantão
 
-**Status:** aprovado para implementação futura — NÃO IMPLEMENTADO ainda.
+**Status:** IMPLEMENTADO (2026-09-01), commits locais no `main`, aguardando teste do usuário antes do push.
 **Data:** 2026-09-01
 **Contexto:** Compensa+ (SEAP-MA)
 
@@ -45,6 +45,10 @@ CREATE TABLE schedule_type_aliases (
 
 ALTER TABLE employees ADD COLUMN schedule_type_id UUID REFERENCES schedule_types(id);
 -- nullable: servidor sem "Horário" preenchido na planilha fica sem escala definida
+
+ALTER TABLE shifts ADD COLUMN conta_para_saldo BOOLEAN NOT NULL DEFAULT TRUE;
+-- decidido uma única vez, no momento em que o shift é inserido (ver 3.4) — nunca
+-- revisado depois, nem se a escala for desabilitada/reabilitada mais tarde.
 ```
 
 `employees.schedule_type_id` é ressincronizado a cada import, no mesmo padrão que `position_id`/`establishment_id` já seguem hoje.
@@ -89,37 +93,47 @@ Em `handleConfirmImport` ([Configuracoes.tsx:529+](../../../frontend/src/pages/a
 
 **Resumo pós-importação:** o resultado da importação (mesmo componente que já mostra `importados`/`atualizados`/`transferidos`) ganha um contador `escalasNovas` — quantas linhas de `schedule_type_aliases` foram criadas nessa importação (ou seja, quantos textos brutos da coluna "Horário" nunca tinham sido vistos antes). Isso dá ao admin um número pra conferir de cabeça contra o que ele sabe que existe na prática: se ele espera ~15 regimes reais e o resumo mostra 42 escalas novas criadas de uma vez, é sinal de que a normalização (3.2) não agrupou direito e vale revisar o mapa de variações (3.7) antes de desabilitar qualquer escala. Em importações seguintes, o número tende a cair perto de zero (a maioria dos textos já vira alias reconhecido).
 
-### 3.4 Trigger de saldo (`trg_recalculate_shift_balance`)
+### 3.4 Trigger de saldo (`trg_recalculate_shift_balance`) — e por que um gate simples não basta
 
-Gate no início da função, antes de qualquer cálculo:
+**Tentativa inicial (rejeitada na verificação):** um gate no início da função, abortando o recálculo quando a escala do servidor não permite carga horária. Parecia suficiente, mas `trg_recalculate_shift_balance` sempre recalculou o saldo por **soma histórica completa** de `shifts` a cada evento (não é incremental — já era assim antes desta feature, ver `database/04_saldo_plantoes.sql:38`). Um gate que só aborta o recálculo NO MOMENTO em que o shift é inserido não impede que esse mesmo shift volte a ser somado da próxima vez que o trigger disparar para aquele servidor (ex.: religar a escala e importar o mês seguinte) — a soma histórica completa inclui de novo o plantão antigo. Isso viola a regra 6 (não retroativo) e foi confirmado empiricamente na verificação final (ver seção 5): reabilitar uma escala e lançar +5 plantões novos somou 15 (10 antigos + 5 novos) em vez de 5.
+
+**Design corrigido — decisão gravada por linha, não recalculada:** cada `shift` guarda, permanentemente, se ele conta pro saldo — decidido **uma vez**, no momento da inserção, via um trigger `BEFORE INSERT` dedicado:
 
 ```sql
+CREATE OR REPLACE FUNCTION trg_set_shift_conta_para_saldo()
+RETURNS TRIGGER AS $$
 DECLARE
     v_permite_carga_horaria BOOLEAN;
 BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_emp_id := OLD.employee_id;
-    ELSE
-        v_emp_id := NEW.employee_id;
-    END IF;
-
     SELECT COALESCE(st.permite_carga_horaria, TRUE) INTO v_permite_carga_horaria
     FROM employees e
     LEFT JOIN schedule_types st ON st.id = e.schedule_type_id
-    WHERE e.id = v_emp_id;
+    WHERE e.id = NEW.employee_id;
 
-    IF NOT v_permite_carga_horaria THEN
-        RETURN NULL; -- escala só-Plus: este shift não altera saldo_plantoes nem gera
-                      -- compensatory_days. Saldo anterior (se houver, de antes da escala
-                      -- ser desabilitada) fica congelado, não é zerado nem recalculado.
-    END IF;
+    NEW.conta_para_saldo := v_permite_carga_horaria;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
-    -- ... resto da função exatamente como hoje ...
+CREATE TRIGGER trg_before_shift_conta_para_saldo
+BEFORE INSERT ON shifts
+FOR EACH ROW EXECUTE FUNCTION trg_set_shift_conta_para_saldo();
 ```
 
-`COALESCE(..., TRUE)` cobre `schedule_type_id IS NULL` (servidor sem escala definida) — comportamento atual preservado, consistente com a regra 5.
+`COALESCE(..., TRUE)` cobre `schedule_type_id IS NULL` (servidor sem escala definida) — comportamento atual preservado, consistente com a regra 5. Só cobre `INSERT` porque o fluxo de reimportação do mesmo ciclo já funciona por DELETE + INSERT (ver `Configuracoes.tsx`), não por UPDATE.
 
-Importante: este gate só é reavaliado quando um `shift` é inserido/atualizado/deletado (é o evento que dispara o trigger). Mudar `employees.schedule_type_id` num import, ou desligar/ligar `schedule_types.permite_carga_horaria`, **não** recalcula automaticamente os `shifts` já existentes — é exatamente o comportamento "não retroativo" da regra 6, sem precisar de nenhum mecanismo extra.
+`trg_recalculate_shift_balance` (a função `AFTER INSERT OR UPDATE OR DELETE` existente) simplifica — não precisa mais checar a escala, só filtra a soma:
+
+```sql
+SELECT COALESCE(SUM(quantidade_plantoes), 0) INTO v_total_shifts
+FROM shifts WHERE employee_id = v_emp_id AND conta_para_saldo = TRUE;
+-- ... resto da função como sempre foi, inclusive a propagação de establishment_id
+-- pra compensatory_days que a migração 18 já tinha adicionado (ver nota abaixo) ...
+```
+
+**Pegadinha real que aconteceu:** ao reescrever `trg_recalculate_shift_balance`, usei como referência o corpo original de `database/04_saldo_plantoes.sql` — sem perceber que a migração 18 (transferência de servidor, já em produção) já tinha alterado essa mesma função pra propagar `establishment_id` do shift pra `compensatory_days` (coluna `NOT NULL` desde a migração 20). A reescrita reverteu essa propagação sem querer, quebrando a geração automática de folga a cada 21 plantões (violação de `NOT NULL`). Corrigido numa migração de acompanhamento antes do primeiro push. Lição: ao substituir uma função com `CREATE OR REPLACE`, verificar a versão **atualmente aplicada** (via todas as migrações que já a tocaram), nunca só o arquivo onde ela foi criada originalmente.
+
+Consequência do design corrigido: mudar `employees.schedule_type_id` num import, ou desligar/ligar `schedule_types.permite_carga_horaria`, não recalcula automaticamente os `shifts` já existentes — é exatamente o comportamento "não retroativo" da regra 6, e agora sobrevive a qualquer recálculo futuro (não só ao próximo evento imediato).
 
 ### 3.5 Lançamento de Plantões (`Folgas.tsx`)
 
@@ -157,3 +171,5 @@ Verificação manual sugerida após implementar:
 3. Confirmar que a carga horária acumulada não aparece na tela de Lançamento de Plantões para esse servidor, mas o Plantão Plus continua lançável.
 4. Reabilitar a escala, importar um novo plantão, confirmar que o acúmulo volta a valer só a partir desse plantão novo (não retroativo).
 5. Rodar `detect_changes()` antes de commitar, comparando com `main`.
+
+**Execução real (2026-09-01):** os passos 2 e 4 acima encontraram os dois problemas documentados na seção 3.4 (gate simples não bastava para não-retroatividade; `establishment_id` perdido) — ambos corrigidos por migrações de acompanhamento (27 e 28) e reverificados com sucesso antes de qualquer commit final. Passo 1 (contador de escalas novas no resumo) e passo 3 (ocultação de saldo na UI) verificados por build limpo + inspeção de código; não houve teste visual em navegador real nesta sessão — fica para o usuário confirmar ao testar localmente antes do push.
