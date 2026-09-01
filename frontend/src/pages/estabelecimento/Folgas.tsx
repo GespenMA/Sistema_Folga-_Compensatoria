@@ -420,9 +420,11 @@ export const Folgas: React.FC = () => {
     }
   };
 
-  // Métricas KPI
+  // Métricas KPI — folga já gerada continua válida/comprável em Solicitar Compra
+  // mesmo se a escala virar Só-Plus depois (grandfather), mas aqui em Lançamento
+  // de Plantões ela não aparece: nada de carga horária é mostrado pra quem é Só-Plus.
   const totalServidores = employees.length;
-  const folgasProntas = employees.filter(e => (e.folgasDisponiveis || 0) > 0).length;
+  const folgasProntas = employees.filter(e => e.schedule_types?.permite_carga_horaria !== false && (e.folgasDisponiveis || 0) > 0).length;
   const proximos = employees.filter(e => {
     if (e.schedule_types?.permite_carga_horaria === false) return false;
     const min = (e.saldo_plantoes * 720) + (e.saldo_minutos || 0);
@@ -430,7 +432,7 @@ export const Folgas: React.FC = () => {
   }).length;
 
   const permiteCargaHorariaDetail = selectedEmployee?.schedule_types?.permite_carga_horaria !== false;
-  const totalFolgas = employees.reduce((acc, e) => acc + (e.folgasDisponiveis || 0), 0);
+  const totalFolgas = employees.reduce((acc, e) => acc + (e.schedule_types?.permite_carga_horaria !== false ? (e.folgasDisponiveis || 0) : 0), 0);
 
   // Lista única de cargos para o filtro
   const cargosDisponiveis = Array.from(
@@ -763,7 +765,10 @@ export const Folgas: React.FC = () => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--space-3)' }}>
               {paginatedFiltered.map((emp, idx) => {
                 const permiteCarga = emp.schedule_types?.permite_carga_horaria !== false;
-                const temFolga = (emp.folgasDisponiveis || 0) > 0;
+                // Folga já gerada antes da escala virar Só-Plus continua válida em
+                // Solicitar Compra (grandfather), mas aqui não aparece — nada de carga
+                // horária é mostrado nesta tela pra quem é Só-Plus.
+                const temFolga = permiteCarga && (emp.folgasDisponiveis || 0) > 0;
                 const totalMinutos = (emp.saldo_plantoes * 720) + (emp.saldo_minutos || 0);
                 const horas = Math.floor(totalMinutos / 60);
                 const minutosStr = String(totalMinutos % 60).padStart(2, '0');
@@ -1115,8 +1120,14 @@ export const Folgas: React.FC = () => {
                 </div>
                 <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#10b981', fontWeight: 600, marginBottom: '4px' }}>Folgas</div>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>{detailFolgas.filter(f => f.status === 'GERADA').length}</div>
-                  <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>disponíveis</div>
+                  {permiteCargaHorariaDetail ? (
+                    <>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>{detailFolgas.filter(f => f.status === 'GERADA').length}</div>
+                      <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>disponíveis</div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-text-muted)', marginTop: '10px' }}>⚡ Só Plus</div>
+                  )}
                 </div>
                 <div style={{ background: 'rgba(59,130,246,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(59,130,246,0.2)' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-primary)', fontWeight: 600, marginBottom: '4px' }}>Pl. Plus</div>
