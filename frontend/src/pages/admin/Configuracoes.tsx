@@ -1043,6 +1043,11 @@ export const Configuracoes: React.FC = () => {
             </div>
           </div>
 
+          <div style={{ margin: 'var(--space-4)', padding: '12px 14px', background: '#f8fafc', border: '1px solid var(--color-divider)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div><strong style={{ color: 'var(--color-accent-700)' }}>🟢 Chave ligada — Carga Horária + Plus:</strong> o servidor acumula carga horária normalmente, pode comprar folga, usufruir e também lançar Plantão Plus.</div>
+            <div><strong style={{ color: 'var(--color-text-muted)' }}>⚪ Chave desligada — Só Plantão Plus:</strong> o servidor não acumula nem gera folga nova por carga horária — só pode receber Plantão Plus. Folgas já geradas antes de desligar continuam válidas normalmente, em qualquer tela.</div>
+          </div>
+
           {loadingEscalas ? (
             <div style={{ padding: 'var(--space-4)' }}>Carregando...</div>
           ) : scheduleTypes.length === 0 ? (
@@ -1056,7 +1061,6 @@ export const Configuracoes: React.FC = () => {
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Escala</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Servidores ativos</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Modalidade</th>
-                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -1065,17 +1069,25 @@ export const Configuracoes: React.FC = () => {
                     <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500 }}>{st.nome}</td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>{st.qtdServidores}</td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
-                      {st.permite_carga_horaria
-                        ? <span className="tag" style={{ background: 'var(--color-accent-500)', color: 'white' }}>Carga Horária + Plus</span>
-                        : <span className="tag tag-outline">Só Plantão Plus</span>}
-                    </td>
-                    <td style={{ padding: 'var(--space-3) var(--space-4)', textAlign: 'right' }}>
                       <button
-                        className="btn btn-ghost"
-                        style={{ padding: '4px 10px', fontSize: '12px' }}
                         onClick={() => handleToggleScheduleType(st.id, !st.permite_carga_horaria)}
+                        title={st.permite_carga_horaria ? 'Clique para restringir a Só Plantão Plus' : 'Clique para habilitar Carga Horária + Plus'}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0' }}
                       >
-                        {st.permite_carga_horaria ? 'Restringir a Só Plus' : 'Habilitar Carga Horária'}
+                        <span style={{
+                          position: 'relative', display: 'inline-block', width: '40px', height: '22px', borderRadius: '11px', flexShrink: 0,
+                          background: st.permite_carga_horaria ? 'var(--color-accent-500)' : '#cbd5e1',
+                          transition: 'background 0.2s'
+                        }}>
+                          <span style={{
+                            position: 'absolute', top: '2px', left: st.permite_carga_horaria ? '20px' : '2px',
+                            width: '18px', height: '18px', borderRadius: '50%', background: 'white',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transition: 'left 0.2s'
+                          }} />
+                        </span>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: st.permite_carga_horaria ? 'var(--color-accent-700)' : 'var(--color-text-muted)' }}>
+                          {st.permite_carga_horaria ? 'Carga Horária + Plus' : 'Só Plantão Plus'}
+                        </span>
                       </button>
                     </td>
                   </tr>
