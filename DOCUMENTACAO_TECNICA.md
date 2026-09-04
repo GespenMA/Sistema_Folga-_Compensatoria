@@ -162,6 +162,7 @@ Servidores penitenciários.
 | `position_id` | UUID FK | Cargo do servidor |
 | `saldo_plantoes` | INTEGER | Legado — saldo acumulado de plantões (trigger) |
 | `saldo_minutos` | INTEGER | Ativo — minutos residuais do ciclo anterior (carry-over), segue o servidor na transferência |
+| `schedule_type_id` | UUID FK, nullable | Escala/regime de trabalho do servidor (migração 26) — resolvido a cada importação a partir da coluna "Horário" da planilha. `NULL` = sem escala definida, tratado como habilitado (ver `schedule_types` abaixo) |
 
 > **IMPORTANTE sobre `saldo_minutos`:** Campo crítico para o cálculo correto de plantões.
 > Representa os minutos que "sobraram" da divisão da carga horária do ciclo anterior.
@@ -178,6 +179,26 @@ Servidores penitenciários.
 > `compensatory_days` podem perder linhas de servidores já transferidos para outra unidade. Não
 > corrigido até o momento desta documentação.
 
+#### `schedule_types` (migração 26)
+Escala/regime de trabalho canônico (ex: "24 H X 72H"), criado automaticamente durante a
+importação a partir da coluna "Horário" da planilha. Gerenciado em
+`Configurações → Escalas de Trabalho` (`admin/Configuracoes.tsx`).
+
+| Coluna | Tipo | Descrição |
+|---|---|---|
+| `nome` | VARCHAR(255) UNIQUE | Nome canônico da escala |
+| `permite_carga_horaria` | BOOLEAN, default `TRUE` | Se `FALSE`, servidores dessa escala não acumulam carga horária compensatória (só têm acesso a Plantão Plus) — nasce sempre `TRUE`, o admin restringe manualmente |
+
+#### `schedule_type_aliases` (migração 26)
+De-para entre o texto exato encontrado na coluna "Horário" e a escala canônica —
+resolve variações de turma/grupo (ex: "24 H X 72H" e "24 H X 72H - 002" apontam pra
+mesma `schedule_type`) sem exigir configuração manual a cada importação.
+
+| Coluna | Tipo | Descrição |
+|---|---|---|
+| `texto_bruto` | VARCHAR(255) UNIQUE | Valor exato da célula "Horário" na planilha |
+| `schedule_type_id` | UUID FK | Escala canônica correspondente. Reatribuível em `Configurações → Escalas de Trabalho` se o agrupamento automático (`normalizarEscala()`, `Configuracoes.tsx`) errar algum caso |
+
 #### `shifts`
 Registro de plantões trabalhados por servidor em um ciclo.
 
@@ -188,6 +209,7 @@ Registro de plantões trabalhados por servidor em um ciclo.
 | `establishment_id` | UUID FK | Unidade onde o plantão aconteceu — **fixo**, não segue transferência (migração 17/18) |
 | `quantidade_plantoes` | INTEGER | Plantões importados |
 | `minutos_residuais` | INTEGER | Minutos residuais gerados neste ciclo (usado para rollback em reimportação) |
+| `conta_para_saldo` | BOOLEAN, default `TRUE` (migração 27) | Decidido **uma vez**, no momento da inserção (trigger `BEFORE INSERT`), a partir da escala do servidor naquele instante — nunca revisado depois. É o que torna a restrição de escala não-retroativa: religar uma escala não volta a contar plantões lançados enquanto ela estava desabilitada |
 | UNIQUE | — | `uq_shifts_employee_cycle (employee_id, cycle_id)` — migração 09 |
 
 #### `compensatory_days`
@@ -260,7 +282,7 @@ Solicitações de compra de folga (indenização) ou Plantão Plus.
 | Perfil | Acesso | Escopo |
 |---|---|---|
 | `ADMIN` | Total | Todos os módulos, incluindo Configurações (CRUD de usuários e cargos, importação) |
-| `GESTAO` | Parcial | Dashboard, Ciclos, Estabelecimentos, Relatórios (sem acesso a Configurações) |
+| `GESTAO` | Parcial, **somente leitura** | Dashboard, Ciclos, Estabelecimentos, Relatórios, Consulta Global de Servidores (sem acesso a Configurações). RLS de `employees`/`shifts`/`compensatory_days`/`purchase_requests` liberada só para `SELECT` desde a migração 29 (ver 6.4b) — antes disso não enxergava nenhuma linha dessas tabelas |
 | `ESTABELECIMENTO` | Restrito | Apenas módulos da própria unidade penal |
 
 ---
@@ -317,12 +339,21 @@ Para cada servidor encontrado na planilha Excel:
    e. Insere o novo registro com os valores recalculados
    ```
 
-### 5.4 Trigger de Banco — `trg_recalculate_shift_balance` (migração 04)
+### 5.4 Trigger de Banco — `trg_recalculate_shift_balance` (migração 04, reescrito nas migrações 27/28)
 
-Trigger legado em PostgreSQL que recalcula `saldo_plantoes` e gera registros em `compensatory_days` automaticamente.
+Quem gera `compensatory_days` **é este trigger** (`AFTER INSERT OR UPDATE OR DELETE ON shifts`), não o
+frontend — o frontend só insere a linha em `shifts`; o cálculo de saldo e a geração automática de
+folga a cada 21 plantões acontecem inteiramente no banco.
 
-> ⚠️ A lógica atual de importação em lote usa o frontend com controle granular.
-> O trigger coexiste mas a geração de folgas é controlada pelo código frontend durante a importação.
+A cada evento, a função recalcula `saldo_plantoes` por **soma histórica completa** —
+`SUM(quantidade_plantoes) FROM shifts WHERE employee_id = X AND conta_para_saldo = TRUE`, não é um
+acúmulo incremental lançamento a lançamento. Isso é importante pra entender a coluna
+`shifts.conta_para_saldo` (migração 27): como o recálculo soma tudo de novo a cada evento, só
+excluir um `shift` do cálculo NO MOMENTO em que ele é inserido não bastaria — o próximo evento
+(qualquer INSERT/UPDATE/DELETE seguinte em `shifts` do mesmo servidor) voltaria a somá-lo. Por isso
+existe um segundo trigger, `BEFORE INSERT`, que grava permanentemente se aquele shift específico
+conta ou não pro saldo, decidido a partir da escala do servidor no momento da inserção — decisão que
+nunca é revisada depois, mesmo que a escala seja religada.
 
 ### 5.5 Fluxo Completo de uma Folga
 
@@ -362,6 +393,33 @@ registros diferentes.
 
 `Configuracoes.tsx` (importação) busca o servidor por matrícula global e detecta a transferência
 automaticamente — não existe tela manual de "transferir servidor".
+
+### 5.7 Elegibilidade de Escala para Modalidade de Compra (migrações 26-28, produção desde 2026-09-01)
+
+Spec completa: [`docs/superpowers/specs/2026-09-01-escalas-modalidade-compra-design.md`](docs/superpowers/specs/2026-09-01-escalas-modalidade-compra-design.md).
+
+**Motivação:** nem todo regime de trabalho deve acumular carga horária compensatória — alguns
+servidores (ex: expediente administrativo) só devem ter acesso a Plantão Plus. O admin geral
+controla isso por **escala** (regime de trabalho, lido da coluna "Horário" da planilha), não por
+servidor individual.
+
+**Como funciona:**
+1. A importação mensal lê a coluna "Horário" de cada linha e resolve a escala do servidor —
+   reconhecendo automaticamente textos já vistos antes (`schedule_type_aliases`) e agrupando
+   variações de turma/grupo (ex: "24 H X 72H" e "24 H X 72H - 002") via uma normalização heurística
+   (`normalizarEscala()`, corta sufixo numérico final). Texto nunca visto antes cria uma escala nova,
+   **sempre nascendo habilitada** — nada muda no comportamento de ninguém até o admin restringir
+   manualmente. A configuração é feita **uma vez por escala**, não a cada importação.
+2. `Configurações → Escalas de Trabalho` lista as escalas com uma chave liga/desliga
+   ("Carga Horária + Plus" vs "Só Plantão Plus") e um mapa de variações reatribuível, pra corrigir
+   os casos em que a normalização automática agrupar errado.
+3. Escala desabilitada: o servidor não acumula carga horária nova (ver 5.4/`conta_para_saldo`) e a
+   tela de Lançamento de Plantões (`estabelecimento/Folgas.tsx`) esconde o saldo acumulado e a aba
+   "Plantões" para ele. Plantão Plus continua disponível pra todo mundo, sem exceção.
+4. **Direito adquirido:** uma folga já `GERADA` **antes** da escala virar Só-Plus continua
+   aparecendo normalmente (badge, KPIs, resumo do modal) e continua comprável/usufruível em
+   Solicitar Compra — só o que está **em progresso** (saldo acumulando rumo a uma próxima folga que
+   não vai mais acontecer) é que fica escondido. Nada é invalidado retroativamente.
 
 **Gap residual conhecido, fora do escopo desta feature:** a RLS de `employees` continua filtrando
 pela lotação **atual** (`get_user_establishment()`), não foi estendida para cobrir servidores com
@@ -414,20 +472,29 @@ RASCUNHO → [Abrir] → ABERTO → [Fechar] → FECHADO → [Reabrir] → REABE
 
 ### 6.3 Configurações (`admin/Configuracoes.tsx`)
 
-Exclusivo para `ADMIN`.
+Exclusivo para `ADMIN`. Abas: Usuários e Permissões, Cargos e Valores, Escalas de Trabalho,
+Importação Mensal, Tutoriais.
 
 **Aba Importação — fluxo detalhado:**
-1. Usuário seleciona `.xlsx` → `xlsx.read()` no browser
-2. Pré-processamento: mapeia colunas, valida matrícula e cargo
-3. Exibe preview com status por linha (novo, atualização, erro)
+1. Usuário seleciona `.xlsx` (aba `Base_Geral`) → `xlsx.read()` no browser
+2. Pré-processamento: mapeia colunas, valida matrícula/cargo/estabelecimento, resolve a escala
+   (coluna "Horário", ver 5.7)
+3. Exibe preview com status por linha (novo, atualização, erro, escala nova)
 4. Ao confirmar: loop assíncrono por servidor com barra de progresso
 5. Para cada servidor:
+   - Resolve/cria a escala (`schedule_types`/`schedule_type_aliases`, ver 5.7)
    - Busca shift existente → rollback do saldo_minutos
-   - Deleta shifts antigos → insere novo
-   - Atualiza employees.saldo_minutos
+   - Deleta shifts antigos → insere novo (dispara `trg_recalculate_shift_balance`, ver 5.4)
+   - Atualiza `employees.saldo_minutos` e `employees.schedule_type_id`
+6. Resultado final mostra importados/atualizados/transferidos/plantões inseridos e, se houver,
+   quantas escalas novas foram criadas nesta importação
 
-**Coluna esperadas na planilha:**
-`MATRICULA` | `NOME` | `CARGO` | `DATA ADMISSAO` | `ESTABELECIMENTO` | `HORAS TRABALHADAS`
+**Colunas da planilha** (`Base_Geral`, por posição): Matrícula, Nome, Cargo, Data Admissão,
+Estabelecimento, **Horário** (coluna F — regime de trabalho, ver 5.7), Trabalhadas (horas).
+
+**Aba Escalas de Trabalho:** lista as escalas com contagem de servidores ativos e uma chave
+liga/desliga por escala ("Carga Horária + Plus" ↔ "Só Plantão Plus"), mais um mapa de variações
+(texto bruto → escala) reatribuível manualmente. Ver 5.7.
 
 ---
 
@@ -440,6 +507,25 @@ Gerenciamento de Unidades Penais.
 - Clone de ciclo anterior via RPC Supabase `clone_cycle_establishments`
 
 ---
+
+### 6.4b Consulta Global de Servidores (`admin/Servidores.tsx`, acessível a `ADMIN` e `GESTAO`)
+
+Listagem paginada (20/página) de todos os servidores do estado, com busca por
+nome/matrícula e filtros por estabelecimento, cargo e **ciclo** (desde 2026-09-04 — filtra via
+`shifts!inner(cycle_id)`, já que o servidor em si não é vinculado a ciclo, só os lançamentos dele).
+
+**Ícone de olho por linha** (desde 2026-09-04) abre `ServidorConsultaModal`
+(`frontend/src/components/ServidorConsultaModal.tsx`) — modal **somente leitura**, sem nenhum botão
+de ação, mostrando o mesmo histórico (Plantões/Folgas/Plantão Plus) que o modal de detalhe de
+`estabelecimento/Folgas.tsx` mostra pro perfil ESTABELECIMENTO. É um componente **independente**,
+construído à parte de propósito — não reaproveita o modal de Folgas.tsx, pra não arriscar
+regressão numa tela já em uso diário em produção.
+
+> **RLS (migração 29):** perfis `GESTAO` são cadastrados com `establishment_id = NULL` e, até
+> 2026-09-04, não enxergavam nenhuma linha de `employees`/`shifts`/`compensatory_days`/
+> `purchase_requests` — nenhuma policy existente cobria esse caso (`establishment_id = NULL`
+> nunca é verdadeiro no Postgres). A migração 29 adiciona `is_gestao()` + 4 políticas **somente
+> `FOR SELECT`**, aditivas — GESTAO continua sem conseguir escrever nada em lugar nenhum.
 
 ### 6.5 Relatórios (`admin/Relatorios.tsx`)
 
@@ -512,6 +598,10 @@ Tela onde a unidade lança o Plantão Plus (compra direta de plantão, sem passa
 - A trava definitiva continua sendo o trigger de banco (`validar_solicitacao_compra`, seção 3.2) —
   esta mudança é só de UX, para não deixar o operador criar uma solicitação que sabe de antemão
   que será barrada na aprovação.
+- **Escala Só-Plus (2026-09-01, ver 5.7):** card do servidor e modal de detalhe escondem saldo
+  acumulado/aba Plantões pra quem está numa escala com `permite_carga_horaria = false`. Folga já
+  `GERADA` antes disso continua aparecendo normalmente (direito adquirido) — só o que está em
+  progresso é que some. Botão de Plantão Plus nunca é afetado.
 
 ### 6.7 Simulador Orçamentário (`estabelecimento/Simulador.tsx`)
 
@@ -655,6 +745,7 @@ Aplicadas manualmente no painel Supabase → SQL Editor, em ordem numérica.
 | `26_escalas_modalidade_compra.sql` | Cria `schedule_types`/`schedule_type_aliases` + `employees.schedule_type_id`; `trg_recalculate_shift_balance` para de acumular saldo para servidores em escala com `permite_carga_horaria = false` |
 | `27_corrige_retroatividade_escala_desabilitada.sql` | Corrige retroatividade indevida da migração 26: adiciona `shifts.conta_para_saldo` (decidido uma vez, na inserção, via trigger `BEFORE INSERT` novo) para que religar uma escala não volte a contar plantões lançados enquanto ela estava desabilitada |
 | `28_restaura_establishment_id_perdido_na_27.sql` | Corrige regressão das migrações 26/27: restaura a propagação de `establishment_id` para `compensatory_days` (introduzida pela migração 18) que tinha sido perdida ao reescrever `trg_recalculate_shift_balance` a partir do corpo original — quebrava a geração automática de folga a cada 21 plantões |
+| `29_gestao_leitura.sql` | Adiciona `is_gestao()` + 4 políticas `FOR SELECT` (aditivas) em `employees`/`shifts`/`compensatory_days`/`purchase_requests` — corrige perfis `GESTAO` (sempre `establishment_id = NULL`) não enxergando nenhum servidor/plantão/folga por falta de policy que cobrisse esse caso. Escrita continua bloqueada para esse perfil |
 
 ---
 
@@ -737,7 +828,7 @@ npm run build
 
 ---
 
-## 12. Status Atual e Pendências (atualizado em 2026-08-15)
+## 12. Status Atual e Pendências (atualizado em 2026-09-04)
 
 Esta seção existe para retomar o trabalho numa sessão futura sem precisar reconstruir contexto do
 zero. As seções 1-11 acima foram revisadas e atualizadas nesta data; o que segue é o que ficou
@@ -798,3 +889,39 @@ o momento desta documentação — perguntar de novo antes de agir, não assumir
   `bbd428e..81e586e`).
 - Esta seção 12 e as seções 3.2, 5.6, 6.6b, 6.7, 6.8, 7 e 9 foram escritas/atualizadas nesta sessão
   para cobrir o que estava desatualizado desde antes dela (documentação parava na migração 12).
+
+### 12.4 Changelog de 2026-09-04 (sessão atual) — commits `5c9469a..e5f4cf3`
+
+**Elegibilidade de escala para modalidade de compra** (feature completa, ver seção 5.7) — spec em
+`docs/superpowers/specs/2026-09-01-escalas-modalidade-compra-design.md`, plano em
+`docs/superpowers/plans/2026-09-01-escalas-modalidade-compra.md`:
+- Migrações 26-28: `schedule_types`/`schedule_type_aliases`, `employees.schedule_type_id`,
+  `shifts.conta_para_saldo`, gate no trigger de saldo.
+- Import (`Configuracoes.tsx`) passa a ler a coluna "Horário", normalizar variações e resolver a
+  escala de cada servidor; preview e resultado da importação mostram a escala/quantas são novas.
+- Nova aba **Escalas de Trabalho** em Configurações: lista + toggle de habilitação (chave
+  liga/desliga com legenda, ajustada por feedback do usuário no fim da sessão) + mapa de variações.
+- `estabelecimento/Folgas.tsx`: esconde saldo acumulado/aba Plantões pra escala Só-Plus, mas
+  **mantém visível** qualquer folga já `GERADA` antes disso (direito adquirido — ajustado após o
+  usuário testar e apontar que a primeira versão escondia demais).
+- **2 bugs reais encontrados na verificação, corrigidos antes do push** (commits `812da0b`):
+  1. O gate inicial só evitava o recálculo no momento da inserção; como o trigger sempre recalcula
+     por soma histórica completa, o próximo evento voltava a contar plantões de quando a escala
+     estava desabilitada (retroativo, contra a regra 6 da spec) — corrigido gravando
+     `conta_para_saldo` permanentemente por linha, na inserção.
+  2. A reescrita do trigger usou o corpo original de `04_saldo_plantoes.sql` como base e reverteu
+     sem querer a propagação de `establishment_id` pra `compensatory_days` que a migração 18
+     (transferência de servidor) já tinha adicionado — quebrava a geração automática de folga a
+     cada 21 plantões (`NOT NULL` violation). Corrigido restaurando essa propagação.
+- Testado numa unidade de teste fictícia (2 escalas fake criadas e depois removidas pelo usuário)
+  antes de validar em dado real.
+
+**Consulta Global de Servidores + acesso de leitura para Gestão** (ver seção 6.4b):
+- Ícone de olho → `ServidorConsultaModal` novo, somente leitura, independente do modal de
+  `Folgas.tsx` (decisão deliberada — evitar risco de regressão numa tela em produção).
+- Filtro de Ciclo na listagem (`shifts!inner`).
+- Migração 29: `is_gestao()` + 4 policies `FOR SELECT` — corrige perfis `GESTAO` que não
+  enxergavam nenhum servidor por falta de policy cobrindo `establishment_id = NULL`.
+
+Todos os commits foram feitos direto no `main` (sem branch de feature, padrão já usado no projeto)
+e só enviados ao GitHub depois do usuário testar localmente em produção.
