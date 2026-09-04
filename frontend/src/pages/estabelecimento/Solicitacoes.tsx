@@ -1657,6 +1657,13 @@ export const Solicitacoes: React.FC = () => {
               </div>
             </div>
 
+            <div style={{ marginBottom: 'var(--space-3)', padding: '10px 12px', background: '#eff6ff', borderLeft: '4px solid #3b82f6', borderRadius: '4px', color: '#1e40af', fontSize: '12px' }}>
+              <strong>ℹ️ Duração desta folga</strong><br/>
+              Esta folga corresponde a <strong>{selectedFolga.quantidade_plantoes} plantão{selectedFolga.quantidade_plantoes !== 1 ? 's' : ''}</strong> de 12 horas cada,
+              totalizando <strong>{selectedFolga.quantidade_plantoes * 12} hora{selectedFolga.quantidade_plantoes * 12 !== 1 ? 's' : ''} de descanso</strong>.
+              Ao confirmar o gozo para a data selecionada, o servidor usufruirá apenas dessas horas — não de um dia inteiro (24h).
+            </div>
+
             <div style={{ marginBottom: 'var(--space-4)', padding: '12px', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '4px', color: '#92400e', fontSize: '12px' }}>
               <strong>⚠️ Responsabilidade da Direção</strong><br/>
               Ao confirmar o gozo, a direção atesta e garante que esta mesma folga foi ou será devidamente registrada no <strong>Sistema de Ponto Eletrônico</strong> do servidor.
