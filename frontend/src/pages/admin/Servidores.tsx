@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { supabase, fetchAll } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { useSearchParams } from 'react-router-dom';
 import { BadgeCheck, ChevronLeft, ChevronRight, Search, Eye } from 'lucide-react';
 import { ServidorConsultaModal } from '../../components/ServidorConsultaModal';
