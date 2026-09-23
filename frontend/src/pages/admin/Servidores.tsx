@@ -107,50 +107,38 @@ export const Servidores: React.FC = () => {
     setPage(1);
   }, [searchTerm, selectedEst, selectedPos, selectedCycle]);
 
-  // Busca os dados da tabela
+  // Busca os dados da tabela via RPC para suportar filtro de ciclo
+  // por shifts OU purchase_requests sem limite de URL do PostgREST.
   const fetchServidores = useCallback(async () => {
     setLoading(true);
     try {
-      // shifts!inner só entra na consulta quando o filtro de ciclo está ativo —
-      // é o que restringe a listagem a quem tem lançamento naquele ciclo
-      // específico (servidor em si não é vinculado a ciclo, só os shifts dele).
-      let query = supabase
-        .from('employees')
-        .select(`
-          id, matricula, nome, data_admissao, ativo,
-          positions (id, nome),
-          establishments (id, nome)
-          ${selectedCycle ? ', shifts!inner(cycle_id)' : ''}
-        `, { count: 'exact' });
+      const { data, error } = await supabase.rpc('get_servidores_por_ciclo', {
+        p_cycle_id: selectedCycle || null,
+        p_establishment_id: selectedEst || null,
+        p_position_id: selectedPos || null,
+        p_search: searchTerm ? sanitizeFilterTerm(searchTerm) : null,
+        p_limit: ITEMS_PER_PAGE,
+        p_offset: (page - 1) * ITEMS_PER_PAGE,
+      });
 
-      // Aplica filtros
-      if (selectedEst) {
-        query = query.eq('establishment_id', selectedEst);
-      }
-      if (selectedPos) {
-        query = query.eq('position_id', selectedPos);
-      }
-      if (selectedCycle) {
-        query = query.eq('shifts.cycle_id', selectedCycle);
-      }
-      if (searchTerm) {
-        const term = sanitizeFilterTerm(searchTerm);
-        query = query.or(`nome.ilike.%${term}%,matricula.ilike.%${term}%`);
-      }
-
-      // Ordenação e Paginação
-      query = query.order('nome');
-      
-      const from = (page - 1) * ITEMS_PER_PAGE;
-      const to = from + ITEMS_PER_PAGE - 1;
-      query = query.range(from, to);
-
-      const { data, error, count } = await query;
-      
       if (error) throw error;
-      
-      setServidores(data as any[]);
-      setTotalRecords(count || 0);
+
+      // A RPC retorna total_count em cada linha (window function)
+      const totalCount = data && data.length > 0 ? Number(data[0].total_count) : 0;
+
+      // Adapta o formato para o mesmo shape que o componente espera
+      const adapted = (data || []).map((r: any) => ({
+        id: r.id,
+        matricula: r.matricula,
+        nome: r.nome,
+        data_admissao: r.data_admissao,
+        ativo: r.ativo,
+        positions: r.position_id ? { id: r.position_id, nome: r.position_nome } : null,
+        establishments: r.establishment_id ? { id: r.establishment_id, nome: r.establishment_nome } : null,
+      }));
+
+      setServidores(adapted);
+      setTotalRecords(totalCount);
 
     } catch (err) {
       console.error('Erro ao buscar servidores:', err);
@@ -161,16 +149,22 @@ export const Servidores: React.FC = () => {
 
   const fetchEstatisticas = useCallback(async () => {
     try {
-      let query = supabase.from('employees').select(`position_id${selectedCycle ? ', shifts!inner(cycle_id)' : ''}`);
-      if (selectedEst) query = query.eq('establishment_id', selectedEst);
-      if (selectedPos) query = query.eq('position_id', selectedPos);
-      if (selectedCycle) query = query.eq('shifts.cycle_id', selectedCycle);
-      if (searchTerm) query = query.or(`nome.ilike.%${sanitizeFilterTerm(searchTerm)}%,matricula.ilike.%${sanitizeFilterTerm(searchTerm)}%`);
+      // Busca todos os servidores do filtro para montar contagens por cargo.
+      // Usa a mesma RPC sem paginação (limit alto) para garantir consistência
+      // com o filtro de ciclo por shifts OU purchase_requests.
+      const { data, error } = await supabase.rpc('get_servidores_por_ciclo', {
+        p_cycle_id: selectedCycle || null,
+        p_establishment_id: selectedEst || null,
+        p_position_id: selectedPos || null,
+        p_search: searchTerm ? sanitizeFilterTerm(searchTerm) : null,
+        p_limit: 10000,
+        p_offset: 0,
+      });
 
-      const data = await fetchAll(query);
+      if (error) throw error;
 
       const counts: Record<string, number> = {};
-      data?.forEach(d => {
+      (data || []).forEach((d: any) => {
         if (d.position_id) {
           counts[d.position_id] = (counts[d.position_id] || 0) + 1;
         }
