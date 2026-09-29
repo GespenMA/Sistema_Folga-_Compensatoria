@@ -104,7 +104,7 @@ export const Relatorios: React.FC = () => {
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [selectedCycle, setSelectedCycle] = useState('');
-  const [selectedEst, setSelectedEst] = useState('');
+  const [selectedEsts, setSelectedEsts] = useState<string[]>([]);
   const [searchServidor, setSearchServidor] = useState('');
   const [selectedCargo, setSelectedCargo] = useState('');
 
@@ -152,7 +152,7 @@ export const Relatorios: React.FC = () => {
   useEffect(() => {
     if (selectedCycle) void loadData(activeTab);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCycle, selectedEst]);
+  }, [selectedCycle, selectedEsts]);
 
   // Recarrega dados ao mudar de tab
   useEffect(() => {
@@ -210,7 +210,7 @@ export const Relatorios: React.FC = () => {
       .from('cycle_establishments')
       .select('id, total_orcado, establishment_id, establishments ( nome ), planning_limits(quantidade_planejada, position_id)')
       .eq('cycle_id', selectedCycle);
-    if (selectedEst) ceQuery = ceQuery.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) ceQuery = ceQuery.in('establishment_id', selectedEsts);
     const ceData = await fetchAll(ceQuery);
 
     // Busca purchase_requests aprovadas e solicitadas para este ciclo
@@ -219,7 +219,7 @@ export const Relatorios: React.FC = () => {
       .select('establishment_id, valor, status, position_id')
       .eq('cycle_id', selectedCycle)
       .in('status', ['APROVADA', 'SOLICITADA']);
-    if (selectedEst) prQuery = prQuery.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) prQuery = prQuery.in('establishment_id', selectedEsts);
     const prData = await fetchAll(prQuery);
     
     if (prData) {
@@ -271,7 +271,7 @@ export const Relatorios: React.FC = () => {
       .select('id, establishment_id, position_id, valor, status, tipo_solicitacao, data_plantao, justificativa, establishments ( nome ), positions ( codigo, nome ), employees ( matricula, nome ), compensatory_days ( periodo_inicio, periodo_fim )')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'APROVADA');
-    if (selectedEst) q = q.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) q = q.in('establishment_id', selectedEsts);
     if (selectedCargo) q = q.eq('position_id', selectedCargo);
     const data = await fetchAll(q);
 
@@ -317,7 +317,7 @@ export const Relatorios: React.FC = () => {
       .from('employees')
       .select('id, matricula, nome, saldo_minutos, establishment_id, establishments ( nome ), positions ( codigo, nome )')
       .eq('ativo', true);
-    if (selectedEst) empQ = empQ.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) empQ = empQ.in('establishment_id', selectedEsts);
     if (selectedCargo) empQ = empQ.eq('position_id', selectedCargo);
     const allEmpData = await fetchAll(empQ);
 
@@ -327,7 +327,7 @@ export const Relatorios: React.FC = () => {
       .from('shifts')
       .select('employee_id, quantidade_plantoes, minutos_residuais, establishment_id, establishments ( nome ), employees ( id, matricula, nome, saldo_minutos, positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle);
-    if (selectedEst) shiftQ = shiftQ.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) shiftQ = shiftQ.in('establishment_id', selectedEsts);
     const shiftData = await fetchAll(shiftQ);
 
     // 2. Busca compensatory_days (folgas geradas). Mesmo princípio: establishment_id
@@ -337,7 +337,7 @@ export const Relatorios: React.FC = () => {
       .from('compensatory_days')
       .select('employee_id, status, quantidade_plantoes, establishment_id, establishments ( nome ), employees ( id, matricula, nome, saldo_minutos, positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle);
-    if (selectedEst) compQ = compQ.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) compQ = compQ.in('establishment_id', selectedEsts);
     const compData = await fetchAll(compQ);
 
     // 3. Busca purchase_requests aprovadas. Mesmo embed de employees — um Plantão Plus
@@ -347,7 +347,7 @@ export const Relatorios: React.FC = () => {
       .select('employee_id, valor, tipo_solicitacao, data_plantao, establishment_id, establishments ( nome ), employees ( id, matricula, nome, saldo_minutos, positions ( codigo, nome ) )')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'APROVADA');
-    if (selectedEst) prQ = prQ.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) prQ = prQ.in('establishment_id', selectedEsts);
     if (selectedCargo) prQ = prQ.eq('position_id', selectedCargo);
     const prData = await fetchAll(prQ);
 
@@ -449,7 +449,7 @@ export const Relatorios: React.FC = () => {
       .select('id, used_at, establishment_id, cycle_id, employees!inner ( id, matricula, nome, position_id, positions ( codigo, nome ) ), establishments ( nome ), cycles ( nome ), profiles!usage_registered_by ( nome )')
       .eq('cycle_id', selectedCycle)
       .eq('status', 'USUFRUIDA');
-    if (selectedEst) q = q.eq('establishment_id', selectedEst);
+    if (selectedEsts.length > 0) q = q.in('establishment_id', selectedEsts);
     if (selectedCargo) q = q.eq('employees.position_id', selectedCargo);
     const data = await fetchAll(q);
 
@@ -665,7 +665,7 @@ export const Relatorios: React.FC = () => {
 
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
       const cicloNome = activeCycleObj?.nome || 'Ciclo';
-      const estNome = selectedEst ? (establishments.find(e => e.id === selectedEst)?.nome || 'Todas') : 'Todas as Unidades';
+      const estNome = selectedEsts.length > 0 ? selectedEsts.map(id => establishments.find(e => e.id === id)?.nome).filter(Boolean).join(', ') : 'Todas as Unidades';
       const now = new Date().toLocaleString('pt-BR');
 
       // Cabeçalho
@@ -900,8 +900,8 @@ export const Relatorios: React.FC = () => {
                 style={{ border: 'none', outline: 'none', width: '100%', fontSize: '13px', background: 'transparent' }}
               />
             ) : (
-              <span style={{ color: selectedEst ? '#1e293b' : '#000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {selectedEst ? establishments.find(e => e.id === selectedEst)?.nome : 'Todas as Unidades'}
+              <span style={{ color: selectedEsts.length > 0 ? '#1e293b' : '#000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {selectedEsts.length > 0 ? `${selectedEsts.length} selecionada(s)` : 'Todas as Unidades'}
               </span>
             )}
           </div>
@@ -909,19 +909,22 @@ export const Relatorios: React.FC = () => {
           {isEstDropdownOpen && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid var(--color-divider)', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', zIndex: 10, maxHeight: '250px', overflowY: 'auto' }}>
               <div 
-                onClick={() => { setSelectedEst(''); setIsEstDropdownOpen(false); }}
-                style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: selectedEst === '' ? '#f1f5f9' : 'transparent', borderBottom: '1px solid #f1f5f9', fontWeight: selectedEst === '' ? 600 : 400 }}
+                onClick={() => { setSelectedEsts([]); }}
+                style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: selectedEsts.length === 0 ? '#f1f5f9' : 'transparent', borderBottom: '1px solid #f1f5f9', fontWeight: selectedEsts.length === 0 ? 600 : 400 }}
               >
                 Todas as Unidades
               </div>
               {filteredEsts.map(e => (
                 <div 
                   key={e.id}
-                  onClick={() => { setSelectedEst(e.id); setIsEstDropdownOpen(false); }}
-                  style={{ padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: selectedEst === e.id ? '#f1f5f9' : 'transparent', borderBottom: '1px solid #f1f5f9', fontWeight: selectedEst === e.id ? 600 : 400 }}
+                  onClick={() => { 
+                    setSelectedEsts(prev => prev.includes(e.id) ? prev.filter(id => id !== e.id) : [...prev, e.id]);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', fontSize: '13px', cursor: 'pointer', background: selectedEsts.includes(e.id) ? '#f1f5f9' : 'transparent', borderBottom: '1px solid #f1f5f9', fontWeight: selectedEsts.includes(e.id) ? 600 : 400 }}
                   onMouseEnter={ev => ev.currentTarget.style.background = '#f8fafc'}
-                  onMouseLeave={ev => ev.currentTarget.style.background = selectedEst === e.id ? '#f1f5f9' : 'transparent'}
+                  onMouseLeave={ev => ev.currentTarget.style.background = selectedEsts.includes(e.id) ? '#f1f5f9' : 'transparent'}
                 >
+                  <input type="checkbox" checked={selectedEsts.includes(e.id)} readOnly style={{ margin: 0, cursor: 'pointer' }} />
                   {e.nome}
                 </div>
               ))}
