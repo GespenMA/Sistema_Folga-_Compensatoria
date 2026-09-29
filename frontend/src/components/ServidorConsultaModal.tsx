@@ -211,7 +211,7 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
     doc.text('Chefia Imediata (Carimbo e Assinatura)', 150, finalY + 5, { align: 'center' });
 
     // Paginação e Data em todas as páginas
-    const pageCount = doc.internal.getNumberOfPages();
+    const pageCount = (doc.internal as any).getNumberOfPages ? (doc.internal as any).getNumberOfPages() : doc.getNumberOfPages();
     const dataHora = new Date().toLocaleString('pt-BR');
     doc.setFontSize(8);
     doc.setTextColor(150, 150, 150);
