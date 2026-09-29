@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { applyApprovedPurchaseToReportRow } from '../../lib/reportCalculations';
 import { useAuth } from '../../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import { FileText, FileSpreadsheet, Filter, Users, DollarSign, Building2, TrendingUp, AlertCircle, ChevronLeft, ChevronRight, CalendarCheck, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
@@ -302,14 +303,7 @@ export const Relatorios: React.FC = () => {
       if (!emp) continue;
 
       const row = ensureRow(emp);
-      if (p.tipo_solicitacao === 'PLANTAO_PLUS') {
-        row.plantao_plus_qtd++;
-        row.valor_plantao_plus += Number(p.valor);
-      } else {
-        row.valor_folga_comp += Number(p.valor);
-      }
-      row.total_a_pagar += Number(p.valor);
-      if (p.data_plantao) row.datas_plantao.push(p.data_plantao);
+      applyApprovedPurchaseToReportRow(row, p);
     }
 
     const rows = Array.from(empMap.values());

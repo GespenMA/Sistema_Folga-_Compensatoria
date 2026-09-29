@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { supabase, fetchAll } from '../../lib/supabase';
+import { applyApprovedPurchaseToReportRow } from '../../lib/reportCalculations';
 import * as XLSX from 'xlsx';
 import { FileText, Download, FileSpreadsheet, Filter, Building2, Users, DollarSign, TrendingUp, AlertCircle, CalendarCheck } from 'lucide-react';
 
@@ -414,18 +415,11 @@ export const Relatorios: React.FC = () => {
       if (!emp) continue;
 
       const row = ensureRow(emp, (p as any).establishment_id, (p as any).establishments?.nome);
-      if (p.tipo_solicitacao === 'PLANTAO_PLUS') {
-        row.plantao_plus_qtd++;
-        row.valor_plantao_plus += Number(p.valor);
-      } else {
-        row.valor_folga_comp += Number(p.valor);
-      }
-      if (p.data_plantao) row.datas_plantao.push(p.data_plantao);
+      applyApprovedPurchaseToReportRow(row, p);
     }
 
     // Calcula total a pagar e ordena as datas de plantão cronologicamente
     for (const row of empMap.values()) {
-      row.total_a_pagar = row.valor_folga_comp + row.valor_plantao_plus;
       row.datas_plantao.sort();
     }
 

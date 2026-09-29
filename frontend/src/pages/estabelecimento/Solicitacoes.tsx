@@ -357,10 +357,11 @@ export const Solicitacoes: React.FC = () => {
         return;
       }
 
-      // 1. Criar ou Atualizar purchase_request (evita erro 409 de unique constraint)
+      // Cria uma nova solicitação para preservar integralmente o histórico. Solicitações
+      // rejeitadas/canceladas nunca são reaproveitadas nem têm requested_at/ciclo alterados.
       const { error: reqError } = await supabase
         .from('purchase_requests')
-        .upsert([{
+        .insert([{
           compensatory_day_id: selectedFolga.id,
           establishment_id: profile.establishment_id,
           cycle_id: activeCycle.id,
@@ -371,14 +372,8 @@ export const Solicitacoes: React.FC = () => {
           justificativa: justificativa,
           data_plantao: dataPlantao,
           status: 'SOLICITADA',
-          requested_by: profile.id,
-          analyzed_by: null,
-          analyzed_at: null,
-          rejection_reason: null,
-          cancelled_by: null,
-          cancelled_at: null,
-          cancellation_reason: null
-        }], { onConflict: 'compensatory_day_id' });
+          requested_by: profile.id
+        }]);
 
       if (reqError) throw reqError;
 
@@ -544,7 +539,7 @@ export const Solicitacoes: React.FC = () => {
 
         const { error: reqError } = await supabase
           .from('purchase_requests')
-          .upsert([{
+          .insert([{
             compensatory_day_id: folga.id,
             establishment_id: profile.establishment_id,
             cycle_id: activeCycle.id,
@@ -556,7 +551,7 @@ export const Solicitacoes: React.FC = () => {
             data_plantao: dataPlantao,
             status: 'SOLICITADA',
             requested_by: profile.id
-          }], { onConflict: 'compensatory_day_id' });
+          }]);
 
         if (reqError) throw reqError;
 
