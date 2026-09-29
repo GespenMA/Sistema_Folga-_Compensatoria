@@ -519,7 +519,11 @@ nome/matrícula e filtros por estabelecimento, cargo e **ciclo** (desde 2026-09-
 de ação, mostrando o mesmo histórico (Plantões/Folgas/Plantão Plus) que o modal de detalhe de
 `estabelecimento/Folgas.tsx` mostra pro perfil ESTABELECIMENTO. É um componente **independente**,
 construído à parte de propósito — não reaproveita o modal de Folgas.tsx, pra não arriscar
-regressão numa tela já em uso diário em produção.
+regressão numa tela já em uso diário em produção. A partir de 2026-09-29, esse modal também passou
+a gerar um **Extrato Oficial em PDF** (com uso das bibliotecas `jspdf` e `jspdf-autotable`)
+incluindo logo, totalizadores financeiros, e colunas de estabelecimento. Ele também foi
+disponibilizado na tela de consulta local (`estabelecimento/Servidores.tsx`), permitindo que as
+próprias unidades emitam o relatório para seus servidores.
 
 > **RLS (migração 29):** perfis `GESTAO` são cadastrados com `establishment_id = NULL` e, até
 > 2026-09-04, não enxergavam nenhuma linha de `employees`/`shifts`/`compensatory_days`/
@@ -923,5 +927,11 @@ o momento desta documentação — perguntar de novo antes de agir, não assumir
 - Migração 29: `is_gestao()` + 4 policies `FOR SELECT` — corrige perfis `GESTAO` que não
   enxergavam nenhum servidor por falta de policy cobrindo `establishment_id = NULL`.
 
+**Extrato em PDF e Acesso de Estabelecimentos ao Modal de Consulta** (2026-09-29):
+- Adicionado botão de exportação em PDF no `ServidorConsultaModal` utilizando `jspdf` e `jspdf-autotable`.
+- O PDF conta com layout oficial, logo, cabeçalho, tabelas separadas por categorias, totalizador de
+  valores do Plantão Plus e exibição da unidade geradora.
+- O modal, antes exclusivo das telas de ADMIN e GESTAO, foi reaproveitado e integrado na tela
+  `estabelecimento/Servidores.tsx`, permitindo à unidade visualizá-lo e imprimi-lo.
 Todos os commits foram feitos direto no `main` (sem branch de feature, padrão já usado no projeto)
 e só enviados ao GitHub depois do usuário testar localmente em produção.
