@@ -1698,7 +1698,7 @@ export const AdminDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {yoyData.map((d, idx) => (
+                      {yoyData.map((d) => (
                         <tr key={d.nomeCompleto} style={{ borderBottom: '1px solid #f1f5f9' }}>
                           <td style={{ padding: '12px 16px', fontWeight: 500 }}>{d.nomeCompleto}</td>
                           <td style={{ padding: '12px 16px', textAlign: 'right', color: '#3b82f6' }}>{getFormatCurrency(d.orcado)}</td>
