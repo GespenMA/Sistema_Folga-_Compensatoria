@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { Download } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // Modal de consulta, SOMENTE LEITURA, do histórico de um servidor — usado pelos
 // perfis ADMIN e GESTAO na tela "Consulta Global de Servidores"
@@ -37,6 +40,190 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'folgas' | 'plantoes' | 'plus'>('folgas');
 
+  const handleDownloadPDF = async () => {
+    if (!employee) return;
+    
+    // Carregar logo (usando a logo existente na pasta public do projeto)
+    const img = new Image();
+    img.src = '/seap-logo.png';
+    await new Promise((resolve) => {
+      img.onload = resolve;
+      img.onerror = resolve; // se falhar, segue sem logo
+    });
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
+    
+    // Cabeçalho Oficial
+    if (img.complete && img.naturalHeight !== 0) {
+      doc.addImage(img, 'PNG', 14, 15, 20, 20); // Altura corrigida para 20 (proporção quadrada)
+    }
+    
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GOVERNO DO ESTADO DO MARANHÃO', 40, 20);
+    doc.setFontSize(10);
+    doc.text('SECRETARIA DE ESTADO DE ADMINISTRAÇÃO PENITENCIÁRIA - SEAP', 40, 25);
+    doc.text('SISTEMA DE FOLGA COMPENSATÓRIA', 40, 30);
+    
+    // Título do Documento
+    doc.setFontSize(14);
+    doc.setFont('helvetica', 'bold');
+    doc.text('EXTRATO OFICIAL DE SALDOS E LANÇAMENTOS', pageWidth / 2, 45, { align: 'center' });
+    
+    // Box de Informações e Resumo de Saldos
+    doc.setDrawColor(200, 200, 200);
+    doc.setFillColor(249, 250, 251);
+    doc.roundedRect(14, 52, pageWidth - 28, 25, 3, 3, 'FD');
+    
+    // Dados do Servidor
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Servidor: `, 18, 60);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${employee.nome}`, 35, 60);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Matrícula: `, 18, 66);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${employee.matricula}`, 35, 66);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Cargo: `, 18, 72);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${employee.positions?.nome || employee.positions?.codigo || '-'}`, 30, 72);
+    
+    // Cálculos de Resumo
+    const saldoPlant = employee.saldo_plantoes || 0;
+    const saldoMin = employee.saldo_minutos || 0;
+    const totalMinutos = (saldoPlant * 720) + saldoMin;
+    const horas = Math.floor(totalMinutos / 60);
+    const min = totalMinutos % 60;
+    
+    const valorTotalPlus = plusRequests.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
+    const folgasUsufruidas = folgas.filter(f => f.status === 'USUFRUIDA').length;
+    const folgasIndenizadas = folgas.filter(f => f.status === 'INDENIZADA').length;
+    const folgasDisponiveis = folgas.filter(f => f.status === 'GERADA').length;
+
+    // Coluna 2 (Folgas)
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Carga Acumulada: `, 90, 60);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${horas}h ${min}m`, 122, 60);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Folgas Disponíveis: `, 90, 66);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${folgasDisponiveis}`, 122, 66);
+
+    // Coluna 3 (Plus e Uso)
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Plantão Plus: `, 145, 60);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`R$ ${valorTotalPlus.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${plusRequests.length}x)`, 168, 60);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Uso (Usu/Ind): `, 145, 66);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${folgasUsufruidas} / ${folgasIndenizadas}`, 168, 66);
+    
+    let finalY = 85;
+    
+    // Histórico de Folgas
+    if (folgas.length > 0) {
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Histórico de Folgas Compensatórias', 14, finalY);
+      autoTable(doc, {
+        startY: finalY + 5,
+        head: [['Status', 'Ciclo Gerador', 'Estabelecimento', 'Período', 'Indenizada (Data)']],
+        headStyles: { fillColor: [16, 185, 129] }, // Verde
+        body: folgas.map((f: any) => {
+          const reqDataPlantao = Array.isArray(f.purchase_requests)
+            ? (f.purchase_requests.length > 0 ? f.purchase_requests[0].data_plantao : null)
+            : (f.purchase_requests?.data_plantao || null);
+          return [
+            f.status,
+            f.cycles?.nome || 'N/A',
+            f.establishments?.nome || '-',
+            `${new Date(f.periodo_inicio).toLocaleDateString('pt-BR')} a ${new Date(f.periodo_fim).toLocaleDateString('pt-BR')}`,
+            f.status === 'INDENIZADA' && reqDataPlantao ? new Date(reqDataPlantao).toLocaleDateString('pt-BR') : '-'
+          ];
+        }),
+      });
+      finalY = (doc as any).lastAutoTable.finalY + 15;
+    }
+    
+    // Histórico de Plantões
+    if (shifts.length > 0) {
+      if (finalY > pageHeight - 40) { doc.addPage(); finalY = 20; }
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Histórico de Lançamentos de Plantão', 14, finalY);
+      autoTable(doc, {
+        startY: finalY + 5,
+        head: [['Data do Plantão', 'Ciclo', 'Estabelecimento', 'Quantidade', 'Observação']],
+        headStyles: { fillColor: [100, 116, 139] }, // Cinza ardósia
+        body: shifts.map((s: any) => [
+          new Date(s.periodo_inicio).toLocaleDateString('pt-BR'),
+          s.cycles?.nome || '-',
+          s.establishments?.nome || '-',
+          `${s.quantidade_plantoes} plantão(ões)`,
+          s.observacao || '-'
+        ]),
+      });
+      finalY = (doc as any).lastAutoTable.finalY + 15;
+    }
+    
+    // Histórico de Plantão Plus
+    if (plusRequests.length > 0) {
+      if (finalY > pageHeight - 40) { doc.addPage(); finalY = 20; }
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Histórico de Plantão Plus', 14, finalY);
+      autoTable(doc, {
+        startY: finalY + 5,
+        head: [['Data Solicitada', 'Estabelecimento', 'Status', 'Valor', 'Solicitado em']],
+        headStyles: { fillColor: [59, 130, 246] }, // Azul
+        body: plusRequests.map((p: any) => [
+          new Date(p.data_plantao).toLocaleDateString('pt-BR'),
+          p.establishments?.nome || '-',
+          p.status,
+          `R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+          new Date(p.requested_at).toLocaleDateString('pt-BR')
+        ]),
+      });
+      finalY = (doc as any).lastAutoTable.finalY + 15;
+    }
+
+    // Assinaturas (se houver espaço ou nova página)
+    if (finalY > pageHeight - 50) { doc.addPage(); finalY = 40; } else { finalY += 25; }
+    
+    doc.setDrawColor(0, 0, 0);
+    doc.line(30, finalY, 80, finalY); // Linha Servidor
+    doc.line(120, finalY, 180, finalY); // Linha Chefia
+    
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    doc.text('Assinatura do Servidor', 55, finalY + 5, { align: 'center' });
+    doc.text('Chefia Imediata (Carimbo e Assinatura)', 150, finalY + 5, { align: 'center' });
+
+    // Paginação e Data em todas as páginas
+    const pageCount = doc.internal.getNumberOfPages();
+    const dataHora = new Date().toLocaleString('pt-BR');
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.text(`Documento gerado em: ${dataHora}`, 14, pageHeight - 10);
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth - 25, pageHeight - 10);
+    }
+    
+    doc.save(`Extrato_${employee.matricula}_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
   useEffect(() => {
     if (!employeeId) return;
     setTab('folgas');
@@ -56,17 +243,17 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
             .single(),
           supabase
             .from('shifts')
-            .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome)')
+            .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome), establishments(nome)')
             .eq('employee_id', employeeId)
             .order('created_at', { ascending: false }),
           supabase
             .from('compensatory_days')
-            .select('id, status, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(data_plantao)')
+            .select('id, status, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(data_plantao), establishments(nome)')
             .eq('employee_id', employeeId)
             .order('generated_at', { ascending: false }),
           supabase
             .from('purchase_requests')
-            .select('id, tipo_solicitacao, data_plantao, valor, status, justificativa, requested_at')
+            .select('id, tipo_solicitacao, data_plantao, valor, status, justificativa, requested_at, establishments(nome)')
             .eq('employee_id', employeeId)
             .eq('tipo_solicitacao', 'PLANTAO_PLUS')
             .order('requested_at', { ascending: false }),
@@ -115,7 +302,17 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
                 {employee?.positions?.nome || employee?.positions?.codigo} &bull; Mat: {employee?.matricula}
               </div>
             </div>
-            <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={onClose}>✕</button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button 
+                onClick={handleDownloadPDF}
+                className="btn btn-ghost" 
+                style={{ padding: '4px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                title="Baixar extrato completo em PDF"
+              >
+                <Download size={14} /> PDF
+              </button>
+              <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={onClose}>✕</button>
+            </div>
           </div>
 
           <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '4px' }}>

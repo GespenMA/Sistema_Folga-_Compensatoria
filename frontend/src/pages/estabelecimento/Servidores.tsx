@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { ServidorConsultaModal } from '../../components/ServidorConsultaModal';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -48,6 +49,9 @@ export const Servidores: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPos, setSelectedPos] = useState('');
   const [selectedCycleId, setSelectedCycleId] = useState('');
+
+  // Modal
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
 
   // Paginação
   const [page, setPage] = useState(1);
@@ -228,6 +232,7 @@ export const Servidores: React.FC = () => {
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Cargo</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Data Admissão</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -245,6 +250,16 @@ export const Servidores: React.FC = () => {
                       {emp.ativo
                         ? <span className="tag" style={{ background: '#059669', color: 'white' }}>Ativo</span>
                         : <span className="tag" style={{ background: '#4b5563', color: 'white' }}>Inativo</span>}
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => setSelectedEmployeeId(emp.id)}
+                        title="Ver histórico e extrato do servidor"
+                        style={{ padding: '6px' }}
+                      >
+                        <Eye size={18} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -284,7 +299,9 @@ export const Servidores: React.FC = () => {
         )}
       </div>
 
-
+      {selectedEmployeeId && (
+        <ServidorConsultaModal employeeId={selectedEmployeeId} onClose={() => setSelectedEmployeeId(null)} />
+      )}
     </div>
   );
 };
