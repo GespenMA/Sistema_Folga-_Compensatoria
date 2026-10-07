@@ -37,7 +37,8 @@ Sistema - Folga Compensatória/
 │   ├── 31_integridade_temporal_solicitacoes.sql
 │   ├── 32_bloqueia_alteracao_gozo_ciclo_fechado.sql
 │   ├── 33_add_escala_rpc_servidores.sql
-│   └── 34_get_escalas_por_estabelecimento.sql
+│   ├── 34_get_escalas_por_estabelecimento.sql
+│   └── 35_ajusta_ciclo_setembro_data_fim.sql
 ├── frontend/               # Aplicação React + Vite
 │   ├── src/
 │   │   ├── lib/supabase.ts         # Cliente Supabase singleton
@@ -958,4 +959,11 @@ e só enviados ao GitHub depois do usuário testar localmente em produção.
   2. Linha intermediária com Matrícula, Cargo e Escala de Trabalho.
   3. Divisória sutil seguida pela linha de Resumo de Saldos e Indicadores (Carga Acumulada, Folgas Disponíveis, Plantão Plus acumulado e Indicador de Uso Usufruído/Indenizado).
 - A altura do bloco de identificação agora se auto-ajusta dinamicamente de acordo com a quantidade de quebras de linha do nome.
+
+**Regra de Vigência dos Ciclos e Encerramento dia 25 às 23:59h (Migração 35):**
+- **Regra de Negócio de Datas:** Os ciclos mensais agora iniciam por padrão no dia 26 do mês de referência e encerram impreterivelmente no **dia 25 do mês subsequente às 23:59:59**.
+- **Cálculo Automático no Frontend (`Ciclos.tsx`):** Substituída a antiga soma genérica de "+30 dias" pela função `calcularDataFimCiclo(dataInicioStr)`. Ao selecionar Mês e Ano de referência, o sistema sugere início no dia 26 e término no dia 25 do mês seguinte (tratando adequadamente a virada de ano dezembro → janeiro).
+- **Flexibilidade e Travamento:** O administrador pode ajustar a Data de Início se necessário; a Data de Fim é recalculada e mantida bloqueada para edição manual, assegurando a integridade do calendário. Ciclos com status `ABERTO` e `REABERTO` agora também permitem ajuste de data pelo modal.
+- **Ajuste do Ciclo Setembro/2026 (Banco de Dados):** O ciclo `Setembro/2026`, que havia sido gerado até `26/10/2026`, teve sua data final atualizada no Supabase para `25/10/2026` via migração `35_ajusta_ciclo_setembro_data_fim.sql`. Verificado que não havia solicitações nem registros de usufruto lançados para 26/10/2026.
+
 

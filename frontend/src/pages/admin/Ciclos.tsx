@@ -91,6 +91,29 @@ export const Ciclos: React.FC = () => {
     return matchesMes && matchesAno;
   });
 
+  // Calcula o término do ciclo: sempre dia 25 do mês subsequente à data de início
+  const calcularDataFimCiclo = (dataInicioStr: string): string => {
+    if (!dataInicioStr) return '';
+    const [anoStr, mesStr] = dataInicioStr.split('-');
+    const anoNum = parseInt(anoStr, 10);
+    const mesNum = parseInt(mesStr, 10);
+    if (isNaN(anoNum) || isNaN(mesNum)) return '';
+
+    let anoFim = anoNum;
+    let mesFim = mesNum + 1;
+    if (mesFim > 12) {
+      mesFim = 1;
+      anoFim += 1;
+    }
+    return `${anoFim}-${String(mesFim).padStart(2, '0')}-25`;
+  };
+
+  const gerarSugestaoDatas = (m: number, a: number) => {
+    const dataIni = `${a}-${String(m).padStart(2, '0')}-26`;
+    const dataTerm = calcularDataFimCiclo(dataIni);
+    return { dataIni, dataTerm };
+  };
+
   const openModal = (ciclo?: Cycle) => {
     if (ciclo) {
       setEditId(ciclo.id);
@@ -101,13 +124,16 @@ export const Ciclos: React.FC = () => {
       setDataInicio(ciclo.data_inicio);
       setDataFim(ciclo.data_fim);
     } else {
+      const currentMonth = new Date().getMonth() + 1;
+      const currentYear = new Date().getFullYear();
+      const { dataIni, dataTerm } = gerarSugestaoDatas(currentMonth, currentYear);
       setEditId(null);
       setEditStatus(null);
-      setNome('');
-      setMes(new Date().getMonth() + 1);
-      setAno(new Date().getFullYear());
-      setDataInicio('');
-      setDataFim('');
+      setNome(`${getMonthName(currentMonth)}/${currentYear}`);
+      setMes(currentMonth);
+      setAno(currentYear);
+      setDataInicio(dataIni);
+      setDataFim(dataTerm);
     }
     setIsModalOpen(true);
   };
@@ -137,7 +163,7 @@ export const Ciclos: React.FC = () => {
     try {
       if (editId) {
         const updateData: any = { nome, mes, ano };
-        if (editStatus === 'RASCUNHO') {
+        if (editStatus !== 'FECHADO') {
           updateData.data_inicio = dataInicio;
           updateData.data_fim = dataFim;
         }
@@ -631,11 +657,45 @@ export const Ciclos: React.FC = () => {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--space-3)', marginBottom: 'var(--space-3)' }}>
                 <div className="field">
                   <label>Mês Referência *</label>
-                  <input className="input" type="number" min="1" max="12" value={mes} onChange={(e) => setMes(Number(e.target.value))} required />
+                  <input 
+                    className="input" 
+                    type="number" 
+                    min="1" 
+                    max="12" 
+                    value={mes} 
+                    onChange={(e) => {
+                      const novoMes = Number(e.target.value);
+                      setMes(novoMes);
+                      if (!editId) {
+                        setNome(`${getMonthName(novoMes)}/${ano}`);
+                        const { dataIni, dataTerm } = gerarSugestaoDatas(novoMes, ano);
+                        setDataInicio(dataIni);
+                        setDataFim(dataTerm);
+                      }
+                    }} 
+                    required 
+                  />
                 </div>
                 <div className="field">
                   <label>Ano Referência *</label>
-                  <input className="input" type="number" min="2020" max="2100" value={ano} onChange={(e) => setAno(Number(e.target.value))} required />
+                  <input 
+                    className="input" 
+                    type="number" 
+                    min="2020" 
+                    max="2100" 
+                    value={ano} 
+                    onChange={(e) => {
+                      const novoAno = Number(e.target.value);
+                      setAno(novoAno);
+                      if (!editId) {
+                        setNome(`${getMonthName(mes)}/${novoAno}`);
+                        const { dataIni, dataTerm } = gerarSugestaoDatas(mes, novoAno);
+                        setDataInicio(dataIni);
+                        setDataFim(dataTerm);
+                      }
+                    }} 
+                    required 
+                  />
                 </div>
               </div>
 
@@ -647,29 +707,32 @@ export const Ciclos: React.FC = () => {
                     type="date" 
                     value={dataInicio} 
                     onChange={(e) => {
-                      setDataInicio(e.target.value);
-                      if (e.target.value) {
-                        const d = new Date(e.target.value + 'T12:00:00Z');
-                        d.setUTCDate(d.getUTCDate() + 30);
-                        setDataFim(d.toISOString().split('T')[0]);
+                      const val = e.target.value;
+                      setDataInicio(val);
+                      if (val) {
+                        setDataFim(calcularDataFimCiclo(val));
+                      } else {
+                        setDataFim('');
                       }
                     }} 
                     required 
-                    disabled={editId !== null && editStatus !== 'RASCUNHO'}
-                    style={{ opacity: editId !== null && editStatus !== 'RASCUNHO' ? 0.6 : 1 }}
+                    disabled={editId !== null && editStatus === 'FECHADO'}
+                    style={{ opacity: editId !== null && editStatus === 'FECHADO' ? 0.6 : 1 }}
                   />
                 </div>
                 <div className="field">
-                  <label>Data de Fim * (Calculada em 30 dias)</label>
+                  <label>Data de Fim * (Até 23:59h)</label>
                   <input 
                     className="input" 
                     type="date" 
                     value={dataFim} 
-                    onChange={(e) => setDataFim(e.target.value)} 
                     required 
                     disabled={true}
-                    style={{ opacity: 0.6, cursor: 'not-allowed' }}
+                    style={{ opacity: 0.85, cursor: 'not-allowed', backgroundColor: '#f1f5f9' }}
                   />
+                  <small style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                    Sempre dia 25 do mês subsequente às 23:59h.
+                  </small>
                 </div>
               </div>
 
