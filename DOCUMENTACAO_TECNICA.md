@@ -966,4 +966,29 @@ e só enviados ao GitHub depois do usuário testar localmente em produção.
 - **Flexibilidade e Travamento:** O administrador pode ajustar a Data de Início se necessário; a Data de Fim é recalculada e mantida bloqueada para edição manual, assegurando a integridade do calendário. Ciclos com status `ABERTO` e `REABERTO` agora também permitem ajuste de data pelo modal.
 - **Ajuste do Ciclo Setembro/2026 (Banco de Dados):** O ciclo `Setembro/2026`, que havia sido gerado até `26/10/2026`, teve sua data final atualizada no Supabase para `25/10/2026` via migração `35_ajusta_ciclo_setembro_data_fim.sql`. Verificado que não havia solicitações nem registros de usufruto lançados para 26/10/2026.
 
+**Regra Operacional para Escalas "Só Plantão Plus" (`permite_carga_horaria = false`):**
+- **Trava de Acúmulo e Transações:** Servidores em regimes com carga horária desligada têm o acúmulo de horas bloqueado, saldos ocultados e não podem ter folgas compensatórias geradas, compradas nem usufruídas.
+- **Frontend Ajustado:** 
+  - `Solicitacoes.tsx`: Oculta folgas de servidores só-Plus em `folgasDisponiveis` e bloqueia abertura e submissão dos modais de compra (`openCompraModal`) e usufruto (`openUsufrutoModal`).
+  - `Folgas.tsx`: Oculta badge de folga disponível para servidores só-Plus e ajusta contadores e modais de detalhe.
+  - `Configuracoes.tsx`: Atualizada descrição explicativa do toggle para "Só Plantão Plus".
+
+**Auto-seleção de Ciclo Padrão na Consulta de Servidores:**
+- **Inicialização Dinâmica:** As telas de servidores (`admin/Servidores.tsx` e `estabelecimento/Servidores.tsx`) passam a inicializar o filtro de ciclo selecionando automaticamente o ciclo com status `ABERTO` ou `REABERTO` (ou o mais recente cadastrado), evitando listar servidores inativos ou ausentes de ciclos anteriores por padrão.
+
+**Extrato em PDF Auditável com Conciliação Contábil e Justificativas:**
+- **Quadro de Conciliação Contábil:** Adicionada tabela formal de balanço contábil evidenciando `(+) Total Trabalhado`, `(-) Abatimento por Folgas Concedidas` (baixa legal de 21 plantões / 252h por folga), `(=) Saldo Atual em Andamento` e carga pendente para a próxima concessão.
+- **Painel de Destino e Fruição das Folgas:** Discriminadas quantidades e valores das folgas Gozadas (comprovadas em folha de frequência), Indenizadas (com valores pagos R$), Em Análise e Disponíveis.
+- **Rastreabilidade Probatória e Justificativas Administrativas:**
+  - As tabelas de Folgas e Plantão Plus contam com sub-linhas formais (`colSpan`) detalhando a **Unidade Solicitante**, **Justificativa Administrativa da Direção** (mínimo de 50 caracteres), **Motivo da Recusa pela SEAP** (quando indeferida) e data/comprovação do ato.
+  - Eliminação de emojis e caracteres especiais que corrompiam a fonte padrão do jsPDF.
+  - Inclusão de termo formal de conferência e campos de assinatura com carimbo para chefia imediata e servidor.
+
+**Painel Operacional no Modal Web (`ServidorConsultaModal.tsx`):**
+- **Cards Rápidos de Decisão:** Destaque no topo da aba de Folgas com contadores de folgas Disponíveis (verde), Indenizadas (azul com valor) e Gozadas.
+- **Barra de Progresso Visual:** Indicador visual de percentual acumulado rumo à próxima concessão com horas e plantões restantes.
+- **Memória de Cálculo Linear:** Sequência direta `1. Trabalhado ➔ 2. Baixado ➔ 3. Saldo Atual` para esclarecimento rápido ao servidor e auditoria na unidade prisional.
+- **Transparência nos Cards:** Exibição da justificativa da unidade nos cards individuais de cada folga do modal.
+
+
 

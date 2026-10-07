@@ -101,8 +101,18 @@ export const Servidores: React.FC = () => {
         const { data: posData } = await supabase.from('positions').select('id, nome').eq('ativo', true).order('nome');
         if (posData) setPositions(posData);
 
-        const { data: cycleData } = await supabase.from('cycles').select('id, nome').order('data_inicio', { ascending: false });
-        if (cycleData) setCycles(cycleData);
+        const { data: cycleData } = await supabase.from('cycles').select('id, nome, status').order('data_inicio', { ascending: false });
+        if (cycleData) {
+          setCycles(cycleData);
+          if (!searchParams.get('cycle_id')) {
+            const active = cycleData.find((c: any) => c.status === 'ABERTO' || c.status === 'REABERTO');
+            if (active) {
+              setSelectedCycle(active.id);
+            } else if (cycleData.length > 0) {
+              setSelectedCycle(cycleData[0].id);
+            }
+          }
+        }
       } catch (err) {
         console.error(err);
       }

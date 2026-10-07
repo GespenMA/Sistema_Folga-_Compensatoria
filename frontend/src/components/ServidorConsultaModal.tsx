@@ -57,187 +57,453 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
     
     // Cabeçalho Oficial
     if (img.complete && img.naturalHeight !== 0) {
-      doc.addImage(img, 'PNG', 14, 15, 20, 20); // Altura corrigida para 20 (proporção quadrada)
+      doc.addImage(img, 'PNG', 14, 14, 18, 18);
     }
     
-    doc.setFontSize(14);
+    doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
-    doc.text('GOVERNO DO ESTADO DO MARANHÃO', 40, 20);
-    doc.setFontSize(10);
-    doc.text('SECRETARIA DE ESTADO DE ADMINISTRAÇÃO PENITENCIÁRIA - SEAP', 40, 25);
-    doc.text('SISTEMA DE FOLGA COMPENSATÓRIA', 40, 30);
+    doc.setTextColor(15, 23, 42);
+    doc.text('GOVERNO DO ESTADO DO MARANHÃO', 36, 18);
+    doc.setFontSize(9);
+    doc.text('SECRETARIA DE ESTADO DE ADMINISTRAÇÃO PENITENCIÁRIA - SEAP', 36, 23);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text('SISTEMA DE FOLGA COMPENSATÓRIA — COMPENSA+', 36, 28);
     
     // Título do Documento
-    doc.setFontSize(14);
+    doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
-    doc.text('EXTRATO OFICIAL DE SALDOS E LANÇAMENTOS', pageWidth / 2, 45, { align: 'center' });
-    
-    // Cálculos de Resumo
+    doc.setTextColor(15, 23, 42);
+    doc.text('EXTRATO OFICIAL DE SALDOS E LANÇAMENTOS', pageWidth / 2, 40, { align: 'center' });
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text('Demonstrativo Individual de Carga Horária, Fruição de Folgas e Plantão Plus', pageWidth / 2, 45, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+
+    // Cálculos de Resumo e Balanço Contábil
     const saldoPlant = employee.saldo_plantoes || 0;
     const saldoMin = employee.saldo_minutos || 0;
     const totalMinutos = (saldoPlant * 720) + saldoMin;
     const horas = Math.floor(totalMinutos / 60);
     const min = totalMinutos % 60;
     
-    const valorTotalPlus = plusRequests.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
-    const folgasUsufruidas = folgas.filter(f => f.status === 'USUFRUIDA').length;
-    const folgasIndenizadas = folgas.filter(f => f.status === 'INDENIZADA').length;
-    const folgasDisponiveis = folgas.filter(f => f.status === 'GERADA').length;
-
-    // Box de Informações e Resumo de Saldos (altura aumentada e layout em linhas dedicadas para evitar sobreposição)
-    doc.setDrawColor(220, 224, 230);
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(14, 52, pageWidth - 28, 30, 3, 3, 'FD');
-    
-    // Linha 1: Nome do Servidor com toda a largura horizontal livre
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Servidor: ', 18, 59);
-    doc.setFont('helvetica', 'bold');
-    const nomeText = doc.splitTextToSize(employee.nome, pageWidth - 55);
-    doc.text(nomeText, 35, 59);
-    
-    // Linha 2: Matrícula, Cargo e Escala
-    const yLinha2 = 66;
-    doc.setFontSize(9.5);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Matrícula: ', 18, yLinha2);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${employee.matricula}`, 35, yLinha2);
-    
-    doc.setFont('helvetica', 'normal');
-    doc.text('Cargo: ', 65, yLinha2);
-    doc.setFont('helvetica', 'bold');
-    const cargoNome = employee.positions?.nome || employee.positions?.codigo || '-';
-    doc.text(cargoNome, 77, yLinha2);
-
-    doc.setFont('helvetica', 'normal');
-    doc.text('Escala: ', 140, yLinha2);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${employee.schedule_types?.nome || '-'}`, 154, yLinha2);
-
-    // Divisória sutil entre os dados cadastrais e o resumo de saldos
-    doc.setDrawColor(226, 232, 240);
-    doc.line(18, 70, pageWidth - 18, 70);
-
-    // Linha 3: Resumo de Saldos e Indicadores distribuídos horizontalmente
-    const yLinha3 = 77;
     const permiteCargaPDF = employee.schedule_types?.permite_carga_horaria !== false;
+
+    // Totais de Plantões Trabalhados
+    const totalPlantoesTrabalhados = shifts.reduce((acc, s) => acc + (s.quantidade_plantoes || 0), 0);
+    const totalHorasTrabalhadas = totalPlantoesTrabalhados * 12;
+
+    // Folgas e abatimentos
+    const totalFolgasGeradas = folgas.length;
+    const plantoesAbatidos = totalFolgasGeradas * 21;
+    const horasAbatidas = plantoesAbatidos * 12;
+
+    const folgasUsufruidas = folgas.filter(f => f.status === 'USUFRUIDA');
+    const folgasIndenizadas = folgas.filter(f => f.status === 'INDENIZADA');
+    const folgasSolicitadas = folgas.filter(f => f.status === 'INDENIZACAO_SOLICITADA');
+    const folgasDisponiveis = folgas.filter(f => f.status === 'GERADA');
+
+    const totalValorIndenizado = folgasIndenizadas.reduce((acc, f) => {
+      const pr = Array.isArray(f.purchase_requests) ? f.purchase_requests[0] : f.purchase_requests;
+      return acc + (Number(pr?.valor) || 0);
+    }, 0);
+
+    const valorTotalPlus = plusRequests.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
+
+    // 1. Box de Identificação do Servidor
+    doc.setDrawColor(203, 213, 225);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(14, 50, pageWidth - 28, 20, 2, 2, 'FD');
 
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text('Carga Acumulada: ', 18, yLinha3);
+    doc.text('Servidor:', 18, 56);
     doc.setFont('helvetica', 'bold');
-    doc.text(permiteCargaPDF ? `${horas}h ${min}m` : 'Só Plus', 48, yLinha3);
-    
-    doc.setFont('helvetica', 'normal');
-    doc.text('Folgas Disponíveis: ', 72, yLinha3);
-    doc.setFont('helvetica', 'bold');
-    doc.text(permiteCargaPDF ? `${folgasDisponiveis}` : '—', 101, yLinha3);
+    doc.text(employee.nome, 33, 56);
 
     doc.setFont('helvetica', 'normal');
-    doc.text('Plantão Plus: ', 114, yLinha3);
+    doc.text('Matrícula:', 135, 56);
     doc.setFont('helvetica', 'bold');
-    doc.text(`R$ ${valorTotalPlus.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${plusRequests.length}x)`, 134, yLinha3);
-    
+    doc.text(String(employee.matricula), 152, 56);
+
+    const cargoNome = employee.positions?.nome || employee.positions?.codigo || '-';
+    const escalaNome = employee.schedule_types?.nome || 'Não definida';
+    const modalidadeStr = permiteCargaPDF ? 'Carga Horária + Plus' : 'Só Plantão Plus';
+
     doc.setFont('helvetica', 'normal');
-    doc.text('Uso: ', 172, yLinha3);
+    doc.text('Cargo:', 18, 64);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${folgasUsufruidas} / ${folgasIndenizadas}`, 180, yLinha3);
-    
-    let finalY = 90;
-    
-    // Histórico de Folgas
-    if (folgas.length > 0) {
-      doc.setFontSize(12);
+    doc.text(cargoNome, 31, 64);
+
+    doc.setFont('helvetica', 'normal');
+    doc.text('Escala:', 95, 64);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${escalaNome} (${modalidadeStr})`, 108, 64);
+
+    // 2. Quadro Demonstrativo Contábil e de Abatimentos
+    let finalY = 74;
+    if (permiteCargaPDF) {
+      doc.setFontSize(9.5);
       doc.setFont('helvetica', 'bold');
-      doc.text('Histórico de Folgas Compensatórias', 14, finalY);
+      doc.setTextColor(15, 23, 42);
+      doc.text('1. Conciliação Contábil de Carga Horária e Abatimentos', 14, finalY);
+
+      const minFaltam = Math.max(0, 15120 - totalMinutos);
+      const horasFaltam = Math.floor(minFaltam / 60);
+      const minRestam = minFaltam % 60;
+      const plantoesFaltam = Math.ceil(minFaltam / 720);
+
       autoTable(doc, {
-        startY: finalY + 5,
-        head: [['Status', 'Ciclo Gerador', 'Estabelecimento', 'Período', 'Indenizada (Data)']],
-        headStyles: { fillColor: [16, 185, 129] }, // Verde
-        body: folgas.map((f: any) => {
-          const reqDataPlantao = Array.isArray(f.purchase_requests)
-            ? (f.purchase_requests.length > 0 ? f.purchase_requests[0].data_plantao : null)
-            : (f.purchase_requests?.data_plantao || null);
-          return [
-            f.status,
-            f.cycles?.nome || 'N/A',
-            f.establishments?.nome || '-',
-            `${new Date(f.periodo_inicio).toLocaleDateString('pt-BR')} a ${new Date(f.periodo_fim).toLocaleDateString('pt-BR')}`,
-            f.status === 'INDENIZADA' && reqDataPlantao ? new Date(reqDataPlantao).toLocaleDateString('pt-BR') : '-'
+        startY: finalY + 3,
+        head: [['Rubrica / Evento Contábil', 'Plantões', 'Carga Horária', 'Discriminação / Regra de Amortização']],
+        headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 54, fontStyle: 'bold' },
+          1: { cellWidth: 22, halign: 'center' },
+          2: { cellWidth: 26, halign: 'center' },
+          3: { cellWidth: 'auto' },
+        },
+        body: [
+          [
+            '(+) Total Trabalhado no Histórico',
+            `${totalPlantoesTrabalhados} pl.`,
+            `${totalHorasTrabalhadas}h 00m`,
+            'Soma de plantões apurados nos ciclos de escalas importados'
+          ],
+          [
+            '(-) Abatimento p/ Folgas Concedidas',
+            `-${plantoesAbatidos} pl.`,
+            `-${horasAbatidas}h 00m`,
+            `${totalFolgasGeradas} folga(s) gerada(s) (baixa regulamentar de 21 plantões / 252h por folga)`
+          ],
+          [
+            '(=) Saldo Atual em Andamento',
+            `${saldoPlant} pl.`,
+            `${horas}h ${String(min).padStart(2, '0')}m`,
+            'Saldo residual acumulando em direção à próxima folga (meta: 252h)'
+          ],
+          [
+            'Pendente p/ Próxima Concessão',
+            `~${plantoesFaltam} pl.`,
+            `${horasFaltam}h ${String(minRestam).padStart(2, '0')}m`,
+            'Carga faltante para completar o ciclo de 252h e gerar nova folga'
+          ]
+        ],
+        didParseCell: (data) => {
+          if (data.section === 'body') {
+            if (data.row.index === 1) {
+              data.cell.styles.textColor = [185, 28, 28]; // Vermelho para o abatimento
+              data.cell.styles.fontStyle = 'bold';
+            } else if (data.row.index === 2) {
+              data.cell.styles.textColor = [29, 78, 216]; // Azul para o saldo atual
+              data.cell.styles.fillColor = [239, 246, 255]; // Fundo azul suave
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        }
+      });
+
+      finalY = (doc as any).lastAutoTable.finalY + 8;
+
+      // Resumo de Fruição / Destino das Folgas Geradas
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(`2. Destino e Fruição das Folgas Concedidas (${totalFolgasGeradas} folga(s) gerada(s) no total)`, 14, finalY);
+
+      autoTable(doc, {
+        startY: finalY + 3,
+        head: [['Destino / Modalidade', 'Quantidade', 'Carga Equivalente', 'Detalhamento / Posição Atual']],
+        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 54, fontStyle: 'bold' },
+          1: { cellWidth: 22, halign: 'center' },
+          2: { cellWidth: 26, halign: 'center' },
+          3: { cellWidth: 'auto' },
+        },
+        body: [
+          [
+            'Gozadas (Descanso)',
+            `${folgasUsufruidas.length}`,
+            `${folgasUsufruidas.length * 252}h`,
+            folgasUsufruidas.length > 0 ? 'Fruição de descanso comprovada em registro de ponto' : 'Nenhuma folga usufruída até o momento'
+          ],
+          [
+            'Indenizadas (Venda)',
+            `${folgasIndenizadas.length}`,
+            `${folgasIndenizadas.length * 252}h`,
+            totalValorIndenizado > 0 ? `Total pago ao servidor: R$ ${totalValorIndenizado.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : (folgasIndenizadas.length > 0 ? 'Indenização financeira efetivada' : 'Nenhuma folga indenizada')
+          ],
+          [
+            'Em Análise / Solicitação',
+            `${folgasSolicitadas.length}`,
+            `${folgasSolicitadas.length * 252}h`,
+            folgasSolicitadas.length > 0 ? 'Solicitação de indenização pendente de portaria/aprovação' : 'Nenhuma solicitação pendente'
+          ],
+          [
+            'Disponíveis (Saldo Livre)',
+            `${folgasDisponiveis.length}`,
+            `${folgasDisponiveis.length * 252}h`,
+            folgasDisponiveis.length > 0 ? 'Folga ativa e liberada para agendamento de gozo ou venda' : 'Sem folgas ativas pendentes de uso'
+          ]
+        ],
+        didParseCell: (data) => {
+          if (data.section === 'body') {
+            if (data.row.index === 3 && folgasDisponiveis.length > 0) {
+              data.cell.styles.textColor = [16, 185, 129]; // Verde
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        }
+      });
+
+      finalY = (doc as any).lastAutoTable.finalY + 9;
+    } else {
+      // Box Só Plus
+      doc.setDrawColor(203, 213, 225);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(14, finalY, pageWidth - 28, 22, 2, 2, 'FD');
+
+      doc.setFillColor(241, 245, 249);
+      doc.rect(14, finalY, pageWidth - 28, 7, 'F');
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 41, 59);
+      doc.text('REGIME DE TRABALHO: SÓ PLANTÃO PLUS (SEM ACÚMULO DE CARGA HORÁRIA)', 18, finalY + 5);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text('Servidor vinculado a regime exclusivo de Plantão Plus — não acumula carga horária nem gera folga compensatória.', 18, finalY + 13);
+      doc.text(`Total de Plantão Plus Lançado: ${plusRequests.length} lançamento(s)  |  Valor Total Acumulado: R$ ${valorTotalPlus.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 18, finalY + 18);
+
+      finalY += 27;
+    }
+
+    // 3. Tabela de Folgas Compensatórias
+    if (permiteCargaPDF && folgas.length > 0) {
+      if (finalY > pageHeight - 40) { doc.addPage(); finalY = 20; }
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('3. Relação Individualizada de Folgas Concedidas', 14, finalY);
+
+      autoTable(doc, {
+        startY: finalY + 3,
+        head: [['Item', 'Ciclo Origem', 'Custo Baixado', 'Situação / Destino', 'Data do Evento', 'Comprovante / Detalhe']],
+        headStyles: { fillColor: [5, 150, 105], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 14, halign: 'center' },
+          1: { cellWidth: 30 },
+          2: { cellWidth: 26, halign: 'center' },
+          3: { cellWidth: 38 },
+          4: { cellWidth: 36 },
+          5: { cellWidth: 'auto' },
+        },
+        body: folgas.flatMap((f: any, idx: number) => {
+          const req = Array.isArray(f.purchase_requests) ? f.purchase_requests[0] : f.purchase_requests;
+          const reqDataPlantao = req?.data_plantao || null;
+          const prValor = req?.valor ? Number(req.valor) : null;
+
+          let situacao = f.status;
+          let dataEvento = '-';
+          let detalhe = '-';
+
+          if (f.status === 'USUFRUIDA') {
+            situacao = 'GOZADA (Descanso)';
+            dataEvento = f.used_at ? `Gozo: ${new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR')}` : 'Data não informada';
+            detalhe = 'Registrado no Ponto';
+          } else if (f.status === 'INDENIZADA') {
+            situacao = 'INDENIZADA (Paga)';
+            dataEvento = reqDataPlantao ? `Plantão: ${new Date(reqDataPlantao + 'T12:00:00Z').toLocaleDateString('pt-BR')}` : (f.generated_at ? `Concessão: ${new Date(f.generated_at).toLocaleDateString('pt-BR')}` : '-');
+            detalhe = prValor ? `R$ ${prValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'Indenização Efetivada';
+          } else if (f.status === 'INDENIZACAO_SOLICITADA') {
+            situacao = 'EM ANÁLISE';
+            dataEvento = reqDataPlantao ? `Plantão: ${new Date(reqDataPlantao + 'T12:00:00Z').toLocaleDateString('pt-BR')}` : '-';
+            detalhe = prValor ? `R$ ${prValor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Solicitado)` : 'Aguardando Aprovação';
+          } else if (f.status === 'GERADA') {
+            situacao = 'DISPONÍVEL (Saldo Ativo)';
+            dataEvento = f.generated_at ? `Concedida: ${new Date(f.generated_at).toLocaleDateString('pt-BR')}` : '-';
+            detalhe = 'Pronta p/ Gozo ou Indenização';
+          }
+
+          const mainRow = [
+            `#${String(folgas.length - idx).padStart(2, '0')}`,
+            f.cycles?.nome || 'Ciclo Legado',
+            '252h (21 pl.)',
+            situacao,
+            dataEvento,
+            detalhe
           ];
+
+          const subParts: string[] = [];
+          if (req) {
+            const unidNome = req.establishments?.nome || f.establishments?.nome || null;
+            const reqDataStr = req.requested_at ? new Date(req.requested_at).toLocaleDateString('pt-BR') : null;
+            if (unidNome || reqDataStr) {
+              subParts.push(`Unidade Solicitante: ${unidNome || 'Não informada'}${reqDataStr ? ` (Solicitado em ${reqDataStr})` : ''}`);
+            }
+            if (req.justificativa) {
+              subParts.push(`Justificativa Administrativa da Unidade: "${req.justificativa}"`);
+            }
+            if (req.rejection_reason) {
+              subParts.push(`Motivo da Recusa pela SEAP: "${req.rejection_reason}"`);
+            }
+          } else if (f.status === 'USUFRUIDA') {
+            const dataGozoStr = f.used_at ? new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR') : 'data registrada';
+            subParts.push(`Usufruto Efetivo: Folga usufruída na escala em ${dataGozoStr} com comprovação em frequência.`);
+          }
+
+          if (subParts.length > 0) {
+            const subRow = [{
+              content: subParts.map(p => `   * ${p}`).join('\n'),
+              colSpan: 6,
+              styles: {
+                fontSize: 6.8,
+                textColor: [71, 85, 105],
+                fillColor: [248, 250, 252],
+                fontStyle: 'normal' as const,
+                cellPadding: { top: 1.2, bottom: 2, left: 14, right: 6 }
+              }
+            }];
+            return [mainRow, subRow];
+          }
+
+          return [mainRow];
         }),
       });
-      finalY = (doc as any).lastAutoTable.finalY + 15;
+      finalY = (doc as any).lastAutoTable.finalY + 9;
     }
-    
-    // Histórico de Plantões
-    if (shifts.length > 0) {
+
+    // 4. Histórico de Plantões Trabalhados (Entradas de Carga Horária)
+    if (permiteCargaPDF && shifts.length > 0) {
       if (finalY > pageHeight - 40) { doc.addPage(); finalY = 20; }
-      doc.setFontSize(12);
+      doc.setFontSize(9.5);
       doc.setFont('helvetica', 'bold');
-      doc.text('Histórico de Lançamentos de Plantão', 14, finalY);
+      doc.setTextColor(15, 23, 42);
+      doc.text('4. Histórico de Plantões Trabalhados (Entradas de Carga Horária)', 14, finalY);
+
       autoTable(doc, {
-        startY: finalY + 5,
-        head: [['Data do Plantão', 'Ciclo', 'Estabelecimento', 'Quantidade', 'Observação']],
-        headStyles: { fillColor: [100, 116, 139] }, // Cinza ardósia
+        startY: finalY + 3,
+        head: [['Período de Vigência', 'Ciclo', 'Estabelecimento', 'Plantões', 'Carga Horária', 'Observação']],
+        headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 40 },
+          1: { cellWidth: 28 },
+          2: { cellWidth: 46 },
+          3: { cellWidth: 20, halign: 'center' },
+          4: { cellWidth: 24, halign: 'center' },
+          5: { cellWidth: 'auto' },
+        },
         body: shifts.map((s: any) => [
-          new Date(s.periodo_inicio).toLocaleDateString('pt-BR'),
+          s.periodo_inicio && s.periodo_fim ? `${new Date(s.periodo_inicio).toLocaleDateString('pt-BR')} a ${new Date(s.periodo_fim).toLocaleDateString('pt-BR')}` : '-',
           s.cycles?.nome || '-',
           s.establishments?.nome || '-',
-          `${s.quantidade_plantoes} plantão(ões)`,
+          `${s.quantidade_plantoes} pl.`,
+          `${s.quantidade_plantoes * 12}h 00m`,
           s.observacao || '-'
         ]),
       });
-      finalY = (doc as any).lastAutoTable.finalY + 15;
+      finalY = (doc as any).lastAutoTable.finalY + 9;
     }
-    
-    // Histórico de Plantão Plus
+
+    // 5. Histórico de Plantão Plus
     if (plusRequests.length > 0) {
       if (finalY > pageHeight - 40) { doc.addPage(); finalY = 20; }
-      doc.setFontSize(12);
+      doc.setFontSize(9.5);
       doc.setFont('helvetica', 'bold');
-      doc.text('Histórico de Plantão Plus', 14, finalY);
+      doc.setTextColor(15, 23, 42);
+      const tituloPlus = permiteCargaPDF ? '5. Histórico de Plantão Plus (Remuneração Extraordinária)' : 'Histórico de Plantão Plus (Remuneração Extraordinária)';
+      doc.text(tituloPlus, 14, finalY);
+
       autoTable(doc, {
-        startY: finalY + 5,
-        head: [['Data Solicitada', 'Estabelecimento', 'Status', 'Valor', 'Solicitado em']],
-        headStyles: { fillColor: [59, 130, 246] }, // Azul
-        body: plusRequests.map((p: any) => [
-          new Date(p.data_plantao).toLocaleDateString('pt-BR'),
-          p.establishments?.nome || '-',
-          p.status,
-          `R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-          new Date(p.requested_at).toLocaleDateString('pt-BR')
-        ]),
+        startY: finalY + 3,
+        head: [['Data do Plantão', 'Estabelecimento', 'Situação', 'Valor (R$)', 'Data da Solicitação']],
+        headStyles: { fillColor: [37, 99, 235], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+        styles: { fontSize: 7.5, cellPadding: 2.2 },
+        columnStyles: {
+          0: { cellWidth: 30 },
+          1: { cellWidth: 52 },
+          2: { cellWidth: 32 },
+          3: { cellWidth: 30, halign: 'right' },
+          4: { cellWidth: 'auto' },
+        },
+        body: plusRequests.flatMap((p: any) => {
+          const mainRow = [
+            new Date(p.data_plantao).toLocaleDateString('pt-BR'),
+            p.establishments?.nome || '-',
+            p.status === 'APROVADA' ? 'APROVADA' : p.status === 'REJEITADA' ? 'REJEITADA' : 'SOLICITADA',
+            `R$ ${Number(p.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+            new Date(p.requested_at).toLocaleDateString('pt-BR')
+          ];
+
+          const subParts: string[] = [];
+          if (p.justificativa) {
+            subParts.push(`Justificativa da Convocação da Unidade: "${p.justificativa}"`);
+          }
+          if (p.rejection_reason) {
+            subParts.push(`Motivo da Recusa pela SEAP: "${p.rejection_reason}"`);
+          }
+
+          if (subParts.length > 0) {
+            const subRow = [{
+              content: subParts.map(s => `   * ${s}`).join('\n'),
+              colSpan: 5,
+              styles: {
+                fontSize: 6.8,
+                textColor: [71, 85, 105],
+                fillColor: [248, 250, 252],
+                fontStyle: 'normal' as const,
+                cellPadding: { top: 1.2, bottom: 2, left: 14, right: 6 }
+              }
+            }];
+            return [mainRow, subRow];
+          }
+
+          return [mainRow];
+        }),
       });
-      finalY = (doc as any).lastAutoTable.finalY + 15;
+      finalY = (doc as any).lastAutoTable.finalY + 9;
     }
 
-    // Assinaturas (se houver espaço ou nova página)
-    if (finalY > pageHeight - 50) { doc.addPage(); finalY = 40; } else { finalY += 25; }
-    
-    doc.setDrawColor(0, 0, 0);
-    doc.line(30, finalY, 80, finalY); // Linha Servidor
-    doc.line(120, finalY, 180, finalY); // Linha Chefia
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    doc.text('Assinatura do Servidor', 55, finalY + 5, { align: 'center' });
-    doc.text('Chefia Imediata (Carimbo e Assinatura)', 150, finalY + 5, { align: 'center' });
+    // 6. Termo de Conferência e Assinaturas
+    if (finalY > pageHeight - 45) { doc.addPage(); finalY = 30; } else { finalY += 15; }
 
-    // Paginação e Data em todas as páginas
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'italic');
+    doc.text('Atesto para os devidos fins que as informações acima conferem com os registros operacionais da unidade prisional.', pageWidth / 2, finalY, { align: 'center' });
+    finalY += 16;
+
+    doc.setDrawColor(71, 85, 105);
+    doc.line(25, finalY, 85, finalY); // Linha Servidor
+    doc.line(125, finalY, 185, finalY); // Linha Chefia
+    
+    doc.setFontSize(8.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(15, 23, 42);
+    doc.text('Assinatura do Servidor', 55, finalY + 4, { align: 'center' });
+    doc.text('Chefia Imediata (Carimbo e Assinatura)', 155, finalY + 4, { align: 'center' });
+
+    // 7. Paginação e Rodapé Oficial em todas as páginas
     const pageCount = (doc.internal as any).getNumberOfPages ? (doc.internal as any).getNumberOfPages() : doc.getNumberOfPages();
     const dataHora = new Date().toLocaleString('pt-BR');
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184);
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-      doc.text(`Documento gerado em: ${dataHora}`, 14, pageHeight - 10);
-      doc.text(`Página ${i} de ${pageCount}`, pageWidth - 25, pageHeight - 10);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, pageHeight - 12, pageWidth - 14, pageHeight - 12);
+      doc.text(`Documento emitido pelo Sistema Compensa+ (SEAP-MA) em ${dataHora}`, 14, pageHeight - 8);
+      doc.text(`Página ${i} de ${pageCount}`, pageWidth - 14, pageHeight - 8, { align: 'right' });
     }
-    
+
     doc.save(`Extrato_${employee.matricula}_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
@@ -265,12 +531,12 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
             .order('created_at', { ascending: false }),
           supabase
             .from('compensatory_days')
-            .select('id, status, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(data_plantao), establishments(nome)')
+            .select('id, status, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, generated_at, used_at, cycles(nome), purchase_requests(id, data_plantao, valor, status, justificativa, rejection_reason, requested_at, establishments(nome)), establishments(nome)')
             .eq('employee_id', employeeId)
             .order('generated_at', { ascending: false }),
           supabase
             .from('purchase_requests')
-            .select('id, tipo_solicitacao, data_plantao, valor, status, justificativa, requested_at, establishments(nome)')
+            .select('id, tipo_solicitacao, data_plantao, valor, status, justificativa, rejection_reason, requested_at, establishments(nome)')
             .eq('employee_id', employeeId)
             .eq('tipo_solicitacao', 'PLANTAO_PLUS')
             .order('requested_at', { ascending: false }),
@@ -290,6 +556,28 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
   if (!employeeId) return null;
 
   const permiteCargaHoraria = employee?.schedule_types?.permite_carga_horaria !== false;
+  const totalPlantoesTrabalhados = shifts.reduce((acc, s) => acc + (s.quantidade_plantoes || 0), 0);
+  const totalHorasTrabalhadas = totalPlantoesTrabalhados * 12;
+  const totalFolgasGeradas = folgas.length;
+  const plantoesAbatidos = totalFolgasGeradas * 21;
+  const horasAbatidas = plantoesAbatidos * 12;
+  const saldoPlant = employee?.saldo_plantoes || 0;
+  const saldoMin = employee?.saldo_minutos || 0;
+  const totalMinutos = (saldoPlant * 720) + saldoMin;
+  const horas = Math.floor(totalMinutos / 60);
+  const min = totalMinutos % 60;
+  const minFaltam = Math.max(0, 15120 - totalMinutos);
+  const folgasDisponiveisQtd = folgas.filter(f => f.status === 'GERADA').length;
+  const folgasGozadasQtd = folgas.filter(f => f.status === 'USUFRUIDA').length;
+  const folgasIndenizadasQtd = folgas.filter(f => f.status === 'INDENIZADA').length;
+  const folgasSolicitadasQtd = folgas.filter(f => f.status === 'INDENIZACAO_SOLICITADA').length;
+  const totalValorIndenizadoModal = folgas.filter(f => f.status === 'INDENIZADA').reduce((acc, f) => {
+    const pr = Array.isArray(f.purchase_requests) ? f.purchase_requests[0] : f.purchase_requests;
+    return acc + (Number(pr?.valor) || 0);
+  }, 0);
+  const percentualProximaFolga = Math.min(Math.round((totalMinutos / 15120) * 100), 100);
+  const proximaFolgaNumero = totalFolgasGeradas + 1;
+  const plantoesFaltamAprox = Math.ceil(minFaltam / 720);
 
   return (
     <div
@@ -412,15 +700,166 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
                   </div>
                 ) : (
                 <div>
-                  <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
-                    Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)
+                  {/* Painel Operacional de Situação e Decisão de Folgas */}
+                  <div style={{ 
+                    marginBottom: '16px', padding: '14px', borderRadius: '10px', 
+                    background: 'var(--color-bg)', border: '1px solid var(--color-divider)',
+                    display: 'flex', flexDirection: 'column', gap: '12px'
+                  }}>
+                    {/* Topo: Título e Regra */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '13px', color: 'var(--color-text)' }}>
+                        <span>⚖️</span> Situação das Folgas Compensatórias
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', background: 'var(--color-surface)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--color-divider)' }}>
+                        Custo: 21 plantões (252h) / folga
+                      </span>
+                    </div>
+
+                    {/* Bloco 1: Cards Rápidos de Decisão (Status Atual das Folgas) */}
+                    <div style={{ display: 'grid', gridTemplateColumns: folgasSolicitadasQtd > 0 ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '8px' }}>
+                      {/* Disponível */}
+                      <div style={{ 
+                        padding: '10px 8px', borderRadius: '8px', textAlign: 'center',
+                        background: folgasDisponiveisQtd > 0 ? 'rgba(16, 185, 129, 0.1)' : 'var(--color-surface)',
+                        border: `1px solid ${folgasDisponiveisQtd > 0 ? '#10b981' : 'var(--color-divider)'}`
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: folgasDisponiveisQtd > 0 ? '#059669' : 'var(--color-text-muted)' }}>
+                          Disponíveis
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: folgasDisponiveisQtd > 0 ? '#059669' : 'var(--color-text-muted)', marginTop: '2px' }}>
+                          {folgasDisponiveisQtd}
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          {folgasDisponiveisQtd > 0 ? 'Livre p/ gozo ou venda' : 'Nenhuma liberada'}
+                        </div>
+                      </div>
+
+                      {/* Indenizadas */}
+                      <div style={{ 
+                        padding: '10px 8px', borderRadius: '8px', textAlign: 'center',
+                        background: folgasIndenizadasQtd > 0 ? 'rgba(59, 130, 246, 0.08)' : 'var(--color-surface)',
+                        border: '1px solid var(--color-divider)'
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+                          Indenizadas
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-primary)', marginTop: '2px' }}>
+                          {folgasIndenizadasQtd}
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          {totalValorIndenizadoModal > 0 ? `R$ ${totalValorIndenizadoModal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : 'Venda financeira'}
+                        </div>
+                      </div>
+
+                      {/* Gozadas */}
+                      <div style={{ 
+                        padding: '10px 8px', borderRadius: '8px', textAlign: 'center',
+                        background: folgasGozadasQtd > 0 ? 'rgba(139, 92, 246, 0.08)' : 'var(--color-surface)',
+                        border: '1px solid var(--color-divider)'
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+                          Gozadas
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-text)', marginTop: '2px' }}>
+                          {folgasGozadasQtd}
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                          Descanso usufruído
+                        </div>
+                      </div>
+
+                      {/* Em Análise (Condicional) */}
+                      {folgasSolicitadasQtd > 0 && (
+                        <div style={{ 
+                          padding: '10px 8px', borderRadius: '8px', textAlign: 'center',
+                          background: 'rgba(245, 158, 11, 0.1)',
+                          border: '1px solid #f59e0b'
+                        }}>
+                          <div style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', color: '#d97706' }}>
+                            Em Análise
+                          </div>
+                          <div style={{ fontSize: '18px', fontWeight: 800, color: '#d97706', marginTop: '2px' }}>
+                            {folgasSolicitadasQtd}
+                          </div>
+                          <div style={{ fontSize: '10px', color: '#b45309', marginTop: '2px' }}>
+                            Aguardando portaria
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bloco 2: Barra de Progresso Rumo à Próxima Folga */}
+                    <div style={{ background: 'var(--color-surface)', padding: '10px 12px', borderRadius: '8px', border: '1px solid var(--color-divider)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--color-text)' }}>
+                          Progresso p/ Próxima Folga (#{String(proximaFolgaNumero).padStart(2, '0')})
+                        </span>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-primary)' }}>
+                          {percentualProximaFolga}% acumulado
+                        </span>
+                      </div>
+                      
+                      {/* Barra de Progresso */}
+                      <div style={{ height: '7px', background: 'var(--color-divider)', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div style={{ 
+                          height: '100%', 
+                          background: 'linear-gradient(90deg, #3b82f6, #1d4ed8)', 
+                          width: `${percentualProximaFolga}%`,
+                          borderRadius: '4px',
+                          transition: 'width 0.4s ease'
+                        }} />
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '10.5px' }}>
+                        <span style={{ color: 'var(--color-text-muted)' }}>
+                          <strong>{saldoPlant} de 21 plantões</strong> ({horas}h {String(min).padStart(2, '0')}m / 252h)
+                        </span>
+                        <span style={{ color: '#d97706', fontWeight: 600 }}>
+                          ⏳ Faltam {Math.floor(minFaltam / 60)}h {String(minFaltam % 60).padStart(2, '0')}m (~{plantoesFaltamAprox} pl.)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Bloco 3: Memória de Cálculo e Auditoria Rápida (Trabalhou -> Baixou -> Saldo) */}
+                    <div style={{ 
+                      display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1fr', 
+                      alignItems: 'center', gap: '6px', 
+                      padding: '8px 10px', borderRadius: '6px', 
+                      background: 'var(--color-surface-hover, rgba(0,0,0,0.02))', 
+                      border: '1px dashed var(--color-divider)',
+                      fontSize: '11px'
+                    }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '9.5px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: 600 }}>1. Trabalhado</div>
+                        <div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{totalPlantoesTrabalhados} pl.</div>
+                        <div style={{ fontSize: '10px', color: 'var(--color-text-muted)' }}>{totalHorasTrabalhadas}h</div>
+                      </div>
+
+                      <div style={{ color: 'var(--color-text-muted)', fontWeight: 700 }}>➔</div>
+
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '9.5px', textTransform: 'uppercase', color: '#dc2626', fontWeight: 600 }}>2. Baixado ({totalFolgasGeradas}x)</div>
+                        <div style={{ fontWeight: 700, color: '#dc2626' }}>-{plantoesAbatidos} pl.</div>
+                        <div style={{ fontSize: '10px', color: '#b91c1c' }}>-{horasAbatidas}h</div>
+                      </div>
+
+                      <div style={{ color: 'var(--color-text-muted)', fontWeight: 700 }}>➔</div>
+
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: '9.5px', textTransform: 'uppercase', color: '#2563eb', fontWeight: 600 }}>3. Saldo Atual</div>
+                        <div style={{ fontWeight: 700, color: '#2563eb' }}>{saldoPlant} pl.</div>
+                        <div style={{ fontSize: '10px', color: '#1d4ed8' }}>{horas}h {String(min).padStart(2, '0')}m</div>
+                      </div>
+                    </div>
                   </div>
                   {folgas.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhuma folga gerada ainda.</div>
                   ) : folgas.map((f: any) => {
-                    const reqDataPlantao = Array.isArray(f.purchase_requests)
-                      ? (f.purchase_requests.length > 0 ? f.purchase_requests[0].data_plantao : null)
-                      : (f.purchase_requests?.data_plantao || null);
+                    const reqObj = Array.isArray(f.purchase_requests)
+                      ? (f.purchase_requests.length > 0 ? f.purchase_requests[0] : null)
+                      : (f.purchase_requests || null);
+                    const reqDataPlantao = reqObj?.data_plantao || null;
 
                     return (
                       <div key={f.id} style={{
@@ -472,6 +911,27 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
                               <div style={{ fontSize: '11px', color: 'var(--color-primary)' }}>
                                 <strong>Data de Gozo:</strong> {new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR')}
                               </div>
+                            </div>
+                          )}
+
+                          {reqObj && (reqObj.justificativa || reqObj.rejection_reason || reqObj.establishments?.nome) && (
+                            <div style={{ marginTop: '6px', padding: '8px 10px', background: 'var(--color-surface)', borderRadius: '6px', borderLeft: '3px solid var(--color-primary)', fontSize: '11px', color: 'var(--color-text)' }}>
+                              {reqObj.establishments?.nome && (
+                                <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginBottom: '2px' }}>
+                                  <strong>Unidade Solicitante:</strong> {reqObj.establishments.nome}
+                                  {reqObj.requested_at && ` (em ${new Date(reqObj.requested_at).toLocaleDateString('pt-BR')})`}
+                                </div>
+                              )}
+                              {reqObj.justificativa && (
+                                <div style={{ fontStyle: 'italic', color: 'var(--color-text)' }}>
+                                  <strong>Justificativa da Unidade:</strong> "{reqObj.justificativa}"
+                                </div>
+                              )}
+                              {reqObj.rejection_reason && (
+                                <div style={{ color: 'var(--color-danger)', marginTop: '3px' }}>
+                                  <strong>Motivo da Recusa:</strong> "{reqObj.rejection_reason}"
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

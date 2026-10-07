@@ -82,7 +82,15 @@ export const Servidores: React.FC = () => {
           .select('id, nome, mes, ano, status')
           .order('ano', { ascending: false })
           .order('mes', { ascending: false });
-        if (cyclesData) setCycles(cyclesData);
+        if (cyclesData) {
+          setCycles(cyclesData);
+          const active = cyclesData.find((c: any) => c.status === 'ABERTO' || c.status === 'REABERTO');
+          if (active) {
+            setSelectedCycleId(active.id);
+          } else if (cyclesData.length > 0) {
+            setSelectedCycleId(cyclesData[0].id);
+          }
+        }
 
         const { data: stData } = await supabase.rpc('get_escalas_por_estabelecimento', {
           p_establishment_id: profile?.establishment_id || null
