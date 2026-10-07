@@ -371,6 +371,12 @@ export const useSolicitacoesData = (establishmentId?: string, userId?: string): 
 
   const registrarGozo = useCallback<SolicitacoesData['registrarGozo']>(
     async (folgaId, dataUsufruto) => {
+      if (!activeCycle) {
+        return { ok: false, message: 'Não há ciclo ativo para registrar o gozo.' };
+      }
+      if (dataUsufruto < activeCycle.data_inicio || dataUsufruto > activeCycle.data_fim) {
+        return { ok: false, message: `A data do gozo precisa estar dentro da vigência do ciclo ativo (${activeCycle.data_inicio} a ${activeCycle.data_fim}).` };
+      }
       try {
         const { error: updateError } = await supabase
           .from('compensatory_days')
@@ -384,11 +390,18 @@ export const useSolicitacoesData = (establishmentId?: string, userId?: string): 
         return { ok: false, message: readableError(err, 'Erro ao registrar o gozo da folga.') };
       }
     },
-    [userId, refreshQuietly],
+    [activeCycle, userId, refreshQuietly],
   );
 
   const desfazerGozo = useCallback<SolicitacoesData['desfazerGozo']>(
     async (folgaId) => {
+      if (!activeCycle) {
+        return { ok: false, message: 'Não há ciclo ativo.' };
+      }
+      const folga = folgasUsufruidas.find(f => f.id === folgaId);
+      if (folga?.used_at && (folga.used_at < activeCycle.data_inicio || folga.used_at > activeCycle.data_fim)) {
+        return { ok: false, message: 'Esta folga foi usufruída em um ciclo já encerrado e não pode ser excluída.' };
+      }
       try {
         const { error: updateError } = await supabase
           .from('compensatory_days')
@@ -402,7 +415,7 @@ export const useSolicitacoesData = (establishmentId?: string, userId?: string): 
         return { ok: false, message: readableError(err, 'Erro ao excluir o registro de gozo.') };
       }
     },
-    [refreshQuietly],
+    [activeCycle, folgasUsufruidas, refreshQuietly],
   );
 
   /**

@@ -394,7 +394,20 @@ export const Solicitacoes: React.FC = () => {
     }
   };
 
+  const isFolgaInActiveCycle = (folga: any) => {
+    if (!activeCycle || !folga.used_at) return false;
+    return folga.used_at >= activeCycle.data_inicio && folga.used_at <= activeCycle.data_fim;
+  };
+
   const openUsufrutoModal = (folga: any) => {
+    if (folga.status === 'USUFRUIDA' && !isFolgaInActiveCycle(folga)) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'Esta folga foi usufruída em um ciclo já encerrado e não pode mais ser alterada.',
+        type: 'warning'
+      });
+      return;
+    }
     setSelectedFolga(folga);
     setDataUsufruto(folga.used_at || '');
     setIsUsufrutoModalOpen(true);
@@ -403,6 +416,33 @@ export const Solicitacoes: React.FC = () => {
   const handleRegistrarUsufruto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFolga || !dataUsufruto) return;
+
+    if (!activeCycle) {
+      setInfoModal({
+        title: 'Ciclo Fechado',
+        message: 'Não há ciclo ativo para registrar o gozo da folga.',
+        type: 'error'
+      });
+      return;
+    }
+
+    if (dataUsufruto < activeCycle.data_inicio || dataUsufruto > activeCycle.data_fim) {
+      setInfoModal({
+        title: 'Data Inválida',
+        message: `A data do gozo precisa estar dentro da vigência do ciclo ativo (${new Date(activeCycle.data_inicio + 'T12:00:00').toLocaleDateString('pt-BR')} a ${new Date(activeCycle.data_fim + 'T12:00:00').toLocaleDateString('pt-BR')}).`,
+        type: 'error'
+      });
+      return;
+    }
+
+    if (selectedFolga.status === 'USUFRUIDA' && !isFolgaInActiveCycle(selectedFolga)) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'Esta folga pertence a um ciclo já encerrado e não pode ser modificada.',
+        type: 'warning'
+      });
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -427,6 +467,15 @@ export const Solicitacoes: React.FC = () => {
   };
 
   const handleDesfazerUsufruto = (folga: any) => {
+    if (!isFolgaInActiveCycle(folga)) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'Esta folga foi usufruída em um ciclo já encerrado. Os dados do ciclo passado não podem ser excluídos ou modificados.',
+        type: 'warning'
+      });
+      return;
+    }
+
     setConfirmAction({
       title: 'Excluir Registro de Gozo',
       message: `Tem certeza que deseja excluir o registro de gozo de ${folga.employees?.nome}? A folga voltará para "Folgas Disponíveis para Compra" — o plantão que a gerou não é perdido.`,
@@ -439,6 +488,15 @@ export const Solicitacoes: React.FC = () => {
   };
 
   const executeDesfazerUsufruto = async (folga: any) => {
+    if (!isFolgaInActiveCycle(folga)) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'Esta folga foi usufruída em um ciclo já encerrado e não pode ser excluída.',
+        type: 'warning'
+      });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const { error } = await supabase
@@ -1386,7 +1444,9 @@ export const Solicitacoes: React.FC = () => {
                         Nenhuma folga usufruída encontrada com esse filtro.
                       </td>
                     </tr>
-                  ) : sortedFolgasUsufruidas.map(f => (
+                  ) : sortedFolgasUsufruidas.map(f => {
+                    const isDoCicloAtivo = isFolgaInActiveCycle(f);
+                    return (
                     <tr key={f.id} style={{ borderBottom: '1px solid var(--color-divider)' }}>
                       <td style={{ padding: 'var(--space-3)' }}>
                         <div style={{ fontWeight: 500 }}>{f.employees?.nome} ({f.employees?.matricula})</div>
@@ -1404,29 +1464,43 @@ export const Solicitacoes: React.FC = () => {
                         <div style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>
                           Em: {f.used_at ? new Date(f.used_at + 'T12:00:00Z').toLocaleDateString('pt-BR') : '--'}
                         </div>
+                        {!isDoCicloAtivo && (
+                          <div style={{ marginTop: '4px' }}>
+                            <span className="tag" style={{ background: '#f1f5f9', color: '#64748b', fontSize: '10px', fontWeight: 600 }} title="Registro consolidado em ciclo anterior encerrado">
+                              🔒 Ciclo Anterior
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: 'var(--space-3)', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                          <button
-                            type="button"
-                            className="btn"
-                            style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}
-                            onClick={() => openUsufrutoModal(f)}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            className="btn"
-                            style={{ padding: '4px 10px', fontSize: '11px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}
-                            onClick={() => handleDesfazerUsufruto(f)}
-                          >
-                            Excluir
-                          </button>
-                        </div>
+                        {isDoCicloAtivo ? (
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ padding: '4px 10px', fontSize: '11px', background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}
+                              onClick={() => openUsufrutoModal(f)}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              className="btn"
+                              style={{ padding: '4px 10px', fontSize: '11px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca' }}
+                              onClick={() => handleDesfazerUsufruto(f)}
+                            >
+                              Excluir
+                            </button>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                            Imutável (Ciclo Encerrado)
+                          </span>
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1671,6 +1745,8 @@ export const Solicitacoes: React.FC = () => {
                   type="date"
                   className="input"
                   required
+                  min={activeCycle?.data_inicio}
+                  max={activeCycle?.data_fim}
                   value={dataUsufruto}
                   onChange={e => setDataUsufruto(e.target.value)}
                 />
