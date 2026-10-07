@@ -25,6 +25,11 @@ type Cycle = {
   nome: string;
 };
 
+type ScheduleType = {
+  id: string;
+  nome: string;
+};
+
 type Employee = {
   id: string;
   matricula: string;
@@ -33,6 +38,7 @@ type Employee = {
   ativo: boolean;
   positions?: Position;
   establishments?: Establishment;
+  schedule_types?: ScheduleType | null;
 };
 
 const ITEMS_PER_PAGE = 20;
@@ -46,6 +52,7 @@ export const Servidores: React.FC = () => {
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [scheduleTypes, setScheduleTypes] = useState<ScheduleType[]>([]);
 
   const [searchParams] = useSearchParams();
 
@@ -53,6 +60,7 @@ export const Servidores: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEst, setSelectedEst] = useState(searchParams.get('est_id') || '');
   const [selectedPos, setSelectedPos] = useState('');
+  const [selectedScheduleType, setSelectedScheduleType] = useState('');
   const [selectedCycle, setSelectedCycle] = useState('');
 
   // Modal de consulta (somente leitura)
@@ -102,10 +110,34 @@ export const Servidores: React.FC = () => {
     fetchCombos();
   }, []);
 
+  // Atualiza as escalas disponíveis dinamicamente com base no estabelecimento selecionado:
+  // Se uma unidade estiver filtrada, exibe APENAS as escalas existentes nela.
+  useEffect(() => {
+    const fetchEscalasPorEst = async () => {
+      try {
+        const { data: stData, error } = await supabase.rpc('get_escalas_por_estabelecimento', {
+          p_establishment_id: selectedEst || null
+        });
+        if (error) throw error;
+        const escalas = stData || [];
+        setScheduleTypes(escalas);
+
+        // Se a escala atualmente selecionada não existir na unidade recém-selecionada, reseta a seleção
+        if (selectedScheduleType && !escalas.some((st: any) => st.id === selectedScheduleType)) {
+          setSelectedScheduleType('');
+        }
+      } catch (err) {
+        console.error('Erro ao buscar escalas por estabelecimento:', err);
+      }
+    };
+
+    fetchEscalasPorEst();
+  }, [selectedEst]);
+
   // Quando mudar filtros (term, est, pos, ciclo), reseta a paginação
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, selectedEst, selectedPos, selectedCycle]);
+  }, [searchTerm, selectedEst, selectedPos, selectedScheduleType, selectedCycle]);
 
   // Busca os dados da tabela via RPC para suportar filtro de ciclo
   // por shifts OU purchase_requests sem limite de URL do PostgREST.
@@ -116,6 +148,7 @@ export const Servidores: React.FC = () => {
         p_cycle_id: selectedCycle || null,
         p_establishment_id: selectedEst || null,
         p_position_id: selectedPos || null,
+        p_schedule_type_id: selectedScheduleType || null,
         p_search: searchTerm ? sanitizeFilterTerm(searchTerm) : null,
         p_limit: ITEMS_PER_PAGE,
         p_offset: (page - 1) * ITEMS_PER_PAGE,
@@ -135,6 +168,7 @@ export const Servidores: React.FC = () => {
         ativo: r.ativo,
         positions: r.position_id ? { id: r.position_id, nome: r.position_nome } : null,
         establishments: r.establishment_id ? { id: r.establishment_id, nome: r.establishment_nome } : null,
+        schedule_types: r.schedule_type_id ? { id: r.schedule_type_id, nome: r.schedule_type_nome } : null,
       }));
 
       setServidores(adapted);
@@ -145,7 +179,7 @@ export const Servidores: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, selectedEst, selectedPos, selectedCycle, page]);
+  }, [searchTerm, selectedEst, selectedPos, selectedScheduleType, selectedCycle, page]);
 
   const fetchEstatisticas = useCallback(async () => {
     try {
@@ -306,6 +340,20 @@ export const Servidores: React.FC = () => {
 
         <div style={{ flex: '1 1 200px' }}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Escala
+          </label>
+          <select
+            value={selectedScheduleType}
+            onChange={(e) => setSelectedScheduleType(e.target.value)}
+            style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--color-border)', outline: 'none', background: '#fff' }}
+          >
+            <option value="">Todas as Escalas</option>
+            {scheduleTypes.map(st => <option key={st.id} value={st.id}>{st.nome}</option>)}
+          </select>
+        </div>
+
+        <div style={{ flex: '1 1 200px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
             Ciclo
           </label>
           <select
@@ -336,6 +384,7 @@ export const Servidores: React.FC = () => {
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Matrícula</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Nome Completo</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Cargo</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Escala</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Estabelecimento Penal</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)', textAlign: 'right' }}>Consultar</th>
@@ -348,6 +397,11 @@ export const Servidores: React.FC = () => {
                     <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500, color: 'var(--color-text-base)' }}>{emp.nome}</td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                       <span className="tag" style={{ background: 'var(--color-surface)', color: 'var(--color-text-base)' }}>{emp.positions?.nome || 'N/A'}</span>
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      <span className="tag" style={{ background: 'var(--color-surface)', color: 'var(--color-text-base)', border: '1px solid var(--color-divider)' }}>
+                        {emp.schedule_types?.nome || '—'}
+                      </span>
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-base)' }}>
                       {emp.establishments?.nome || '-'}

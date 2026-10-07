@@ -26,14 +26,21 @@ type Cycle = {
   status: string;
 };
 
+type ScheduleType = {
+  id: string;
+  nome: string;
+};
+
 type Employee = {
   id: string;
   matricula: string;
   nome: string;
   data_admissao: string;
   position_id: string;
+  schedule_type_id?: string | null;
   ativo: boolean;
   positions?: Position;
+  schedule_types?: ScheduleType | null;
 };
 
 export const Servidores: React.FC = () => {
@@ -44,11 +51,13 @@ export const Servidores: React.FC = () => {
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [scheduleTypes, setScheduleTypes] = useState<ScheduleType[]>([]);
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPos, setSelectedPos] = useState('');
   const [selectedCycleId, setSelectedCycleId] = useState('');
+  const [selectedScheduleTypeId, setSelectedScheduleTypeId] = useState('');
 
   // Modal
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
@@ -59,7 +68,7 @@ export const Servidores: React.FC = () => {
   // Volta pra primeira página sempre que um filtro muda
   useEffect(() => {
     setPage(1);
-  }, [searchTerm, selectedPos, selectedCycleId]);
+  }, [searchTerm, selectedPos, selectedCycleId, selectedScheduleTypeId]);
 
   // Busca única dos combos (Cargos e Ciclos)
   useEffect(() => {
@@ -74,6 +83,11 @@ export const Servidores: React.FC = () => {
           .order('ano', { ascending: false })
           .order('mes', { ascending: false });
         if (cyclesData) setCycles(cyclesData);
+
+        const { data: stData } = await supabase.rpc('get_escalas_por_estabelecimento', {
+          p_establishment_id: profile?.establishment_id || null
+        });
+        if (stData) setScheduleTypes(stData);
       } catch (err) {
         console.error(err);
       }
@@ -111,7 +125,8 @@ export const Servidores: React.FC = () => {
         .from('employees')
         .select(`
           *,
-          positions (id, nome, codigo)
+          positions (id, nome, codigo),
+          schedule_types (id, nome)
         `, { count: 'exact' })
         .eq('establishment_id', profile.establishment_id)
         .order('nome');
@@ -121,6 +136,9 @@ export const Servidores: React.FC = () => {
       }
       if (selectedPos) {
         query = query.eq('position_id', selectedPos);
+      }
+      if (selectedScheduleTypeId) {
+        query = query.eq('schedule_type_id', selectedScheduleTypeId);
       }
       if (searchTerm) {
         const term = sanitizeFilterTerm(searchTerm);
@@ -140,7 +158,7 @@ export const Servidores: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [profile, selectedCycleId, selectedPos, searchTerm, page]);
+  }, [profile, selectedCycleId, selectedPos, selectedScheduleTypeId, searchTerm, page]);
 
   // Debounce para a busca por termo (mesmo padrão da Consulta Global de Servidores do Admin)
   useEffect(() => {
@@ -199,6 +217,21 @@ export const Servidores: React.FC = () => {
 
         <div style={{ flex: '1 1 200px' }}>
           <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+            Escala
+          </label>
+          <select
+            className="input"
+            value={selectedScheduleTypeId}
+            onChange={(e) => setSelectedScheduleTypeId(e.target.value)}
+            style={{ width: '100%', padding: '10px' }}
+          >
+            <option value="">Todas as Escalas</option>
+            {scheduleTypes.map(st => <option key={st.id} value={st.id}>{st.nome}</option>)}
+          </select>
+        </div>
+
+        <div style={{ flex: '1 1 200px' }}>
+          <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: '6px' }}>
             Ciclo
           </label>
           <select
@@ -230,6 +263,7 @@ export const Servidores: React.FC = () => {
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Matrícula</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Nome Completo</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Cargo</th>
+                  <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Escala</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Data Admissão</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Status</th>
                   <th style={{ padding: 'var(--space-3) var(--space-4)', color: 'var(--color-text-muted)' }}>Ações</th>
@@ -242,6 +276,11 @@ export const Servidores: React.FC = () => {
                     <td style={{ padding: 'var(--space-3) var(--space-4)', fontWeight: 500 }}>{emp.nome}</td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                       <span className="tag" style={{ background: 'var(--color-surface)' }}>{emp.positions?.nome || 'N/A'}</span>
+                    </td>
+                    <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
+                      <span className="tag" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-divider)' }}>
+                        {emp.schedule_types?.nome || '—'}
+                      </span>
                     </td>
                     <td style={{ padding: 'var(--space-3) var(--space-4)' }}>
                       {new Date(emp.data_admissao + 'T12:00:00Z').toLocaleDateString('pt-BR')}

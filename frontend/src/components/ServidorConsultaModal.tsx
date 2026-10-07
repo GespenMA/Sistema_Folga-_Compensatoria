@@ -19,7 +19,7 @@ type EmployeeDetalhe = {
   saldo_plantoes: number;
   saldo_minutos?: number;
   positions?: { nome: string; codigo: string } | null;
-  schedule_types?: { permite_carga_horaria: boolean } | null;
+  schedule_types?: { nome?: string; permite_carga_horaria: boolean } | null;
 };
 
 const folgaStatusMeta = (status: string) => {
@@ -72,28 +72,6 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
     doc.setFont('helvetica', 'bold');
     doc.text('EXTRATO OFICIAL DE SALDOS E LANÇAMENTOS', pageWidth / 2, 45, { align: 'center' });
     
-    // Box de Informações e Resumo de Saldos
-    doc.setDrawColor(200, 200, 200);
-    doc.setFillColor(249, 250, 251);
-    doc.roundedRect(14, 52, pageWidth - 28, 25, 3, 3, 'FD');
-    
-    // Dados do Servidor
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Servidor: `, 18, 60);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${employee.nome}`, 35, 60);
-    
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Matrícula: `, 18, 66);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${employee.matricula}`, 35, 66);
-    
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Cargo: `, 18, 72);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${employee.positions?.nome || employee.positions?.codigo || '-'}`, 30, 72);
-    
     // Cálculos de Resumo
     const saldoPlant = employee.saldo_plantoes || 0;
     const saldoMin = employee.saldo_minutos || 0;
@@ -106,29 +84,66 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
     const folgasIndenizadas = folgas.filter(f => f.status === 'INDENIZADA').length;
     const folgasDisponiveis = folgas.filter(f => f.status === 'GERADA').length;
 
-    // Coluna 2 (Folgas)
+    // Box de Informações e Resumo de Saldos (altura aumentada e layout em linhas dedicadas para evitar sobreposição)
+    doc.setDrawColor(220, 224, 230);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(14, 52, pageWidth - 28, 30, 3, 3, 'FD');
+    
+    // Linha 1: Nome do Servidor com toda a largura horizontal livre
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Carga Acumulada: `, 90, 60);
+    doc.text('Servidor: ', 18, 59);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${horas}h ${min}m`, 122, 60);
+    const nomeText = doc.splitTextToSize(employee.nome, pageWidth - 55);
+    doc.text(nomeText, 35, 59);
+    
+    // Linha 2: Matrícula, Cargo e Escala
+    const yLinha2 = 66;
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Matrícula: ', 18, yLinha2);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${employee.matricula}`, 35, yLinha2);
     
     doc.setFont('helvetica', 'normal');
-    doc.text(`Folgas Disponíveis: `, 90, 66);
+    doc.text('Cargo: ', 65, yLinha2);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${folgasDisponiveis}`, 122, 66);
+    const cargoNome = employee.positions?.nome || employee.positions?.codigo || '-';
+    doc.text(cargoNome, 77, yLinha2);
 
-    // Coluna 3 (Plus e Uso)
     doc.setFont('helvetica', 'normal');
-    doc.text(`Plantão Plus: `, 145, 60);
+    doc.text('Escala: ', 140, yLinha2);
     doc.setFont('helvetica', 'bold');
-    doc.text(`R$ ${valorTotalPlus.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${plusRequests.length}x)`, 168, 60);
+    doc.text(`${employee.schedule_types?.nome || '-'}`, 154, yLinha2);
+
+    // Divisória sutil entre os dados cadastrais e o resumo de saldos
+    doc.setDrawColor(226, 232, 240);
+    doc.line(18, 70, pageWidth - 18, 70);
+
+    // Linha 3: Resumo de Saldos e Indicadores distribuídos horizontalmente
+    const yLinha3 = 77;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Carga Acumulada: ', 18, yLinha3);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${horas}h ${min}m`, 48, yLinha3);
     
     doc.setFont('helvetica', 'normal');
-    doc.text(`Uso (Usu/Ind): `, 145, 66);
+    doc.text('Folgas Disponíveis: ', 72, yLinha3);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${folgasUsufruidas} / ${folgasIndenizadas}`, 168, 66);
+    doc.text(`${folgasDisponiveis}`, 101, yLinha3);
+
+    doc.setFont('helvetica', 'normal');
+    doc.text('Plantão Plus: ', 114, yLinha3);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`R$ ${valorTotalPlus.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${plusRequests.length}x)`, 134, yLinha3);
     
-    let finalY = 85;
+    doc.setFont('helvetica', 'normal');
+    doc.text('Uso: ', 172, yLinha3);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`${folgasUsufruidas} / ${folgasIndenizadas}`, 180, yLinha3);
+    
+    let finalY = 90;
     
     // Histórico de Folgas
     if (folgas.length > 0) {
@@ -238,7 +253,7 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
         const [{ data: empData }, { data: shiftsData }, { data: folgasData }, { data: plusData }] = await Promise.all([
           supabase
             .from('employees')
-            .select('id, nome, matricula, saldo_plantoes, saldo_minutos, positions(nome, codigo), schedule_types(permite_carga_horaria)')
+            .select('id, nome, matricula, saldo_plantoes, saldo_minutos, positions(nome, codigo), schedule_types(nome, permite_carga_horaria)')
             .eq('id', employeeId)
             .single(),
           supabase
@@ -300,6 +315,9 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
               <div style={{ fontWeight: 700, fontSize: '16px', textTransform: 'uppercase' }}>{employee?.nome || '...'}</div>
               <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
                 {employee?.positions?.nome || employee?.positions?.codigo} &bull; Mat: {employee?.matricula}
+                {employee?.schedule_types?.nome && (
+                  <span> &bull; Escala: <strong style={{ color: 'var(--color-text)' }}>{employee.schedule_types.nome}</strong></span>
+                )}
               </div>
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>

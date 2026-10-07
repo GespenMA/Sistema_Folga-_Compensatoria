@@ -30,16 +30,14 @@
 ```
 Sistema - Folga Compensatória/
 ├── database/               # Scripts SQL de migração (aplicados manualmente no Supabase)
-│   ├── 00_init_schema.sql
-│   ├── 01_rls_functions_triggers.sql
-│   ├── 02_rpc_clone.sql
-│   ├── 03_import_planilha.sql
-│   ├── 04_saldo_plantoes.sql
-│   ├── 05_limite_financeiro.sql
-│   ├── 06_saldo_minutos.sql
-│   ├── 07_shifts_minutos_residuais.sql
-│   ├── 08_plantao_plus.sql
-│   └── 09_unique_shift_employee_cycle.sql
+│   ├── 00_init_schema.sql ... 09_unique_shift_employee_cycle.sql
+│   ├── 10_trigger_calculo_orcamento.sql ... 19_transferencia_servidor_constraint.sql
+│   ├── 20_transferencia_servidor_rls.sql ... 29_gestao_leitura.sql
+│   ├── 30_fix_servidores_filtro_ciclo.sql
+│   ├── 31_integridade_temporal_solicitacoes.sql
+│   ├── 32_bloqueia_alteracao_gozo_ciclo_fechado.sql
+│   ├── 33_add_escala_rpc_servidores.sql
+│   └── 34_get_escalas_por_estabelecimento.sql
 ├── frontend/               # Aplicação React + Vite
 │   ├── src/
 │   │   ├── lib/supabase.ts         # Cliente Supabase singleton
@@ -935,3 +933,29 @@ o momento desta documentação — perguntar de novo antes de agir, não assumir
   `estabelecimento/Servidores.tsx`, permitindo à unidade visualizá-lo e imprimi-lo.
 Todos os commits foram feitos direto no `main` (sem branch de feature, padrão já usado no projeto)
 e só enviados ao GitHub depois do usuário testar localmente em produção.
+
+### 12.5 Changelog de 2026-10-07 (sessão atual)
+
+**Bloqueio de Modificação/Exclusão de Gozo em Ciclos Fechados (Migração 32 — commit `6bf654c`):**
+- **Regra de Imutabilidade Histórica:** Na tela de solicitação de compra / perfil do estabelecimento penal, após encerrar o ciclo, o sistema não permite mais editar ou excluir dados de gozo de folga de ciclos anteriores.
+- **Camada de Banco de Dados:** Migração `32_bloqueia_alteracao_gozo_ciclo_fechado.sql` atualizou a trigger `check_cycle_status()` no PostgreSQL. Tentativas de `UPDATE` ou `DELETE` em `compensatory_days` cujo ciclo de origem esteja com status `FECHADO` são abortadas com erro impeditivo.
+- **Camada de Frontend:** `frontend/src/pages/estabelecimento/Solicitacoes.tsx` e `frontend/src/hooks/useSolicitacoesData.ts` foram adaptados:
+  - Verificação de vigência através do ciclo ativo (`activeCycle.id`). Registros originados em ciclos encerrados recebem identificador visual com badge `🔒 Ciclo Anterior` e mensagem `Imutável (Ciclo Encerrado)`.
+  - Botões de "Editar" e "Excluir" são desabilitados para folgas de ciclos encerrados.
+  - Funções de submit (`handleEditSave`) e exclusão (`handleDelete`) validam a trava no cliente antes do disparo ao banco.
+
+**Coluna e Filtro Contextual de Escalas de Trabalho (Migrações 33 e 34):**
+- **Coluna "Escala" na Tabela de Servidores:** Adicionada coluna visualizando a escala de trabalho do servidor em `frontend/src/pages/admin/Servidores.tsx` e `frontend/src/pages/estabelecimento/Servidores.tsx`, oriunda da coluna "Horário" da importação (`schedule_types.nome`).
+- **Filtro Contextual por Estabelecimento:** 
+  - Ao filtrar uma unidade prisional específica na tela de Servidores, o dropdown de escalas exibe **exclusivamente** as escalas de trabalho que de fato existem naquela unidade, evitando listar opções vazias.
+  - Criada a função RPC `get_escalas_por_estabelecimento(p_establishment_id UUID)` (migração 34).
+  - Atualizada a função RPC `get_servidores_por_ciclo` (migração 33) para suportar filtragem pelo parâmetro `p_schedule_type_id` e retornar `schedule_type_nome`.
+
+**Ajuste de Layout no Extrato PDF (`ServidorConsultaModal.tsx`):**
+- **Resolução de Sobreposição de Nomes Longos:** No extrato em PDF gerado pelo modal de consulta do servidor (ícone do olho), nomes longos ficavam sobrepostos ao campo "Carga Acumulada".
+- **Reorganização Estrutural do Box de Identificação:** O cabeçalho foi redesenhado em 3 seções dedicadas:
+  1. Linha superior com o Nome Completo ocupando a largura total (com quebra dinâmica de linha via `splitTextToSize`).
+  2. Linha intermediária com Matrícula, Cargo e Escala de Trabalho.
+  3. Divisória sutil seguida pela linha de Resumo de Saldos e Indicadores (Carga Acumulada, Folgas Disponíveis, Plantão Plus acumulado e Indicador de Uso Usufruído/Indenizado).
+- A altura do bloco de identificação agora se auto-ajusta dinamicamente de acordo com a quantidade de quebras de linha do nome.
+
