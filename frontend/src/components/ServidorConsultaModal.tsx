@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { generateEmployeeStatementPdf } from '../lib/generateEmployeeStatementPdf';
 
 // Modal de consulta, SOMENTE LEITURA, do histórico de um servidor — usado pelos
 // perfis ADMIN e GESTAO na tela "Consulta Global de Servidores"
@@ -40,7 +41,7 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'folgas' | 'plantoes' | 'plus'>('folgas');
 
-  const handleDownloadPDF = async () => {
+  const handleDownloadPDFLegacy = async () => {
     if (!employee) return;
     
     // Carregar logo (usando a logo existente na pasta public do projeto)
@@ -505,6 +506,12 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
     }
 
     doc.save(`Extrato_${employee.matricula}_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+  void handleDownloadPDFLegacy;
+
+  const handleDownloadPDF = async () => {
+    if (!employee) return;
+    await generateEmployeeStatementPdf({ employee, shifts, folgas, plusRequests });
   };
 
   useEffect(() => {

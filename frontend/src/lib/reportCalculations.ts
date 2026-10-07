@@ -13,6 +13,45 @@ export type ApprovedPurchase = {
   data_plantao?: string | null;
 };
 
+export type PlusPayment = {
+  status: string;
+  valor: number | string | null;
+};
+
+export function allowsCompensatoryLoad(
+  scheduleType: { permite_carga_horaria?: boolean } | null | undefined,
+) {
+  return scheduleType?.permite_carga_horaria !== false;
+}
+
+export function getEmployeeStatementTitle(showCompensatoryLoad: boolean) {
+  return showCompensatoryLoad
+    ? 'EXTRATO INDIVIDUAL DE FOLGAS E PLANTÃO PLUS'
+    : 'EXTRATO INDIVIDUAL - FOLGA COMPENSATÓRIA';
+}
+
+export function formatReportShiftCount(
+  count: number,
+  mode: 'normal' | 'deduction' | 'estimate' = 'normal',
+) {
+  if (mode === 'deduction') return `-${count} plantões`;
+  if (mode === 'estimate') return `aprox. ${count} plantões`;
+  return `${count} plantões`;
+}
+
+export function summarizeApprovedPlusPayments(payments: PlusPayment[]) {
+  return payments.reduce(
+    (summary, payment) => {
+      if (payment.status === 'APROVADA') {
+        summary.approvedCount++;
+        summary.approvedAmount += Number(payment.valor) || 0;
+      }
+      return summary;
+    },
+    { approvedCount: 0, approvedAmount: 0 },
+  );
+}
+
 export function applyApprovedPurchaseToReportRow(
   row: PaymentReportFields,
   purchase: ApprovedPurchase,

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Modelo — Extrato Individual de Folgas e Plantão Plus</title>
+  <style>
+    @page { size: A4; margin: 0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #1d2939; background: #d9dee5; font-family: Arial, Helvetica, sans-serif; }
+    .page { width: 210mm; height: 297mm; margin: 0 auto 8mm; padding: 12mm 14mm 14mm; background: #fff; position: relative; overflow: hidden; page-break-after: always; }
+    .page:last-child { page-break-after: auto; }
+    .masthead { display: grid; grid-template-columns: 23mm 1fr auto; gap: 5mm; align-items: center; border-bottom: 1.2pt solid #263b55; padding-bottom: 4mm; }
+    .crest { width: 18mm; max-height: 21mm; object-fit: contain; }
+    .government { font-family: Arial, Helvetica, sans-serif; line-height: 1.25; }
+    .government strong { display: block; font-size: 10.5pt; }
+    .government span { display: block; font-size: 7.7pt; color: #475467; }
+    .brand { text-align: right; font-weight: 700; color: #263b55; font-size: 10pt; }
+    .brand small { display: block; margin-top: 1mm; font-size: 6.8pt; font-weight: 400; color: #667085; }
+    h1 { margin: 5mm 0 1mm; font-family: Arial, Helvetica, sans-serif; font-size: 16.2pt; line-height: 1.08; color: #172b46; text-align: center; letter-spacing: .15pt; }
+    .subtitle { margin: 0 0 4mm; text-align: center; color: #667085; font-size: 7.8pt; }
+    .identity { display: grid; grid-template-columns: 1.5fr .7fr 1.1fr; border-top: 1px solid #cbd3dc; border-bottom: 1px solid #cbd3dc; background: #f6f8fa; }
+    .field { min-height: 13mm; padding: 2.4mm 3mm; border-right: 1px solid #d8dee6; border-bottom: 1px solid #d8dee6; }
+    .field:nth-child(3n) { border-right: 0; }
+    .field:nth-last-child(-n+3) { border-bottom: 0; }
+    .label { display: block; margin-bottom: .7mm; color: #667085; font-size: 6.6pt; }
+    .value { display: block; color: #1d2939; font-size: 8.1pt; font-weight: 700; line-height: 1.18; }
+    .section-title { margin: 4mm 0 2.2mm; padding-bottom: 1.2mm; border-bottom: 1.5pt solid #263b55; font-family: Arial, Helvetica, sans-serif; color: #172b46; font-size: 10.2pt; }
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2.3mm; }
+    .card { min-height: 20mm; padding: 2.7mm; border: 1px solid #cad2dc; border-top: 2.5pt solid #263b55; background: #fafbfc; }
+    .card.good { border-top-color: #33745b; }
+    .card .card-label { display: block; min-height: 6mm; color: #667085; font-size: 6.1pt; font-weight: 700; line-height: 1.15; }
+    .card strong { display: block; margin: 1mm 0 .4mm; font-family: Arial, Helvetica, sans-serif; color: #172b46; font-size: 15pt; }
+    .card.good strong { color: #276149; }
+    .card small { color: #667085; font-size: 6pt; line-height: 1.15; }
+    .progress-meta { display: flex; justify-content: space-between; margin: 3mm 0 1.2mm; font-size: 7pt; font-weight: 700; }
+    .progress-track { height: 4.2mm; background: #e3e7ec; border: 1px solid #cbd3dc; }
+    .progress-fill { width: 61.2%; height: 100%; background: #33745b; }
+    .progress-notes { display: flex; justify-content: space-between; margin-top: 1mm; color: #667085; font-size: 6.4pt; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th { padding: 1.7mm 2mm; background: #344b67; color: #fff; font-size: 6.5pt; text-align: left; font-weight: 700; }
+    td { padding: 1.8mm 2mm; border-bottom: 1px solid #d7dde5; color: #29384c; font-size: 6.5pt; line-height: 1.2; vertical-align: top; }
+    tbody tr:nth-child(even) td { background: #f7f8fa; }
+    .status { font-weight: 700; color: #276149; }
+    .balance td:first-child { font-weight: 700; }
+    .balance tr.current td { background: #edf5f1; font-weight: 700; }
+    .balance tr.adjust td { background: #fff8e9; }
+    .note { margin-top: 1.5mm; color: #667085; font-size: 6.1pt; line-height: 1.25; }
+    .page-heading { margin: 0 0 1mm; font-family: Arial, Helvetica, sans-serif; font-size: 15pt; color: #172b46; }
+    .page-intro { margin: 0 0 4mm; color: #667085; font-size: 7.2pt; }
+    .plus-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin-bottom: 2.4mm; }
+    .summary-box { padding: 3mm; border: 1px solid #cad2dc; background: #f6f8fa; }
+    .summary-box span { color: #667085; font-size: 6.5pt; }
+    .summary-box strong { float: right; font-family: Arial, Helvetica, sans-serif; font-size: 13pt; color: #172b46; }
+    .justification { margin-top: 2mm; padding: 2.5mm 3mm; border-left: 2.5pt solid #33745b; background: #f1f6f3; font-size: 6.6pt; line-height: 1.25; }
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 18mm; margin-top: 14mm; }
+    .signature { padding-top: 2mm; border-top: 1px solid #364152; text-align: center; color: #344054; font-size: 7pt; }
+    .signature strong { display: block; margin-bottom: .8mm; font-size: 7.4pt; }
+    footer { position: absolute; left: 14mm; right: 14mm; bottom: 7mm; display: flex; justify-content: space-between; padding-top: 2mm; border-top: 1px solid #d0d5dd; color: #667085; font-size: 6.3pt; }
+    @media print { body { background: #fff; } .page { margin: 0; } }
+  </style>
+</head>
+<body>
+  <section class="page">
+    <header class="masthead">
+      <img class="crest" src="../../frontend/public/seap-logo.png" alt="Brasão da SEAP">
+      <div class="government">
+        <strong>Governo do Estado do Maranhão</strong>
+        <span>Secretaria de Estado de Administração Penitenciária — SEAP</span>
+        <span>Sistema de Folga Compensatória</span>
+      </div>
+      <div class="brand">Compensa+<small>Extrato individual</small></div>
+    </header>
+
+    <h1>EXTRATO INDIVIDUAL DE FOLGAS E PLANTÃO PLUS</h1>
+    <p class="subtitle">Posição individual de saldo, concessões e registros operacionais</p>
+
+    <div class="identity">
+      <div class="field"><span class="label">Nome</span><span class="value">ABIEDILSON DA SILVA FONTINELE</span></div>
+      <div class="field"><span class="label">Matrícula</span><span class="value">874460</span></div>
+      <div class="field"><span class="label">Cargo</span><span class="value">Agente Penitenciário Temporário</span></div>
+      <div class="field"><span class="label">Escala</span><span class="value">12Hx36H — Noturno</span></div>
+      <div class="field"><span class="label">Unidade</span><span class="value">Supervisão de Segurança Interna — SSI</span></div>
+      <div class="field"><span class="label">Emissão</span><span class="value">07/10/2026 — 17:24</span></div>
+    </div>
+
+    <h2 class="section-title">Situação atual</h2>
+    <div class="cards">
+      <div class="card good"><span class="card-label">Folgas disponíveis</span><strong>1</strong><small>Liberada para gozo ou indenização</small></div>
+      <div class="card"><span class="card-label">Folgas gozadas</span><strong>0</strong><small>Nenhum gozo registrado</small></div>
+      <div class="card"><span class="card-label">Saldo para próxima folga</span><strong>154h18</strong><small>Saldo atual acumulado</small></div>
+      <div class="card"><span class="card-label">Falta para próxima folga</span><strong>97h42</strong><small>Aproximadamente 9 plantões</small></div>
+    </div>
+    <div class="progress-meta"><span>Progresso para próxima folga</span><span>61,2%</span></div>
+    <div class="progress-track"><div class="progress-fill"></div></div>
+    <div class="progress-notes"><span>154h18 acumuladas</span><span>Meta: 252h</span><span>Faltam: 97h42</span></div>
+
+    <h2 class="section-title">Histórico de folgas</h2>
+    <table>
+      <colgroup><col style="width:8%"><col style="width:16%"><col style="width:14%"><col style="width:16%"><col style="width:15%"><col style="width:16%"><col style="width:15%"></colgroup>
+      <thead><tr><th>Nº</th><th>Ciclo de origem</th><th>Situação</th><th>Concessão</th><th>Gozo</th><th>Indenização</th><th>Carga utilizada</th></tr></thead>
+      <tbody><tr><td>01</td><td>Agosto/2026</td><td class="status">Disponível</td><td>28/08/2026</td><td>—</td><td>—</td><td>21 plantões<br>252h</td></tr></tbody>
+    </table>
+
+    <h2 class="section-title">Memória do saldo</h2>
+    <table class="balance">
+      <colgroup><col style="width:44%"><col style="width:20%"><col style="width:18%"><col style="width:18%"></colgroup>
+      <thead><tr><th>Descrição</th><th>Plantões</th><th>Carga horária</th><th>Conferência</th></tr></thead>
+      <tbody>
+        <tr><td>Total computado</td><td>33 plantões</td><td>396h00</td><td>Histórico</td></tr>
+        <tr><td>Carga utilizada para gerar folgas</td><td>-21 plantões</td><td>-252h00</td><td>1 folga gerada</td></tr>
+        <tr class="adjust"><td>Saldo/ajustes anteriores</td><td>—</td><td>+10h18</td><td>Origem não discriminada</td></tr>
+        <tr class="current"><td>Saldo atual</td><td>12 plantões</td><td>154h18</td><td>Saldo do sistema</td></tr>
+        <tr><td>Falta para próxima folga</td><td>aprox. 9 plantões</td><td>97h42</td><td>Meta de 252h</td></tr>
+      </tbody>
+    </table>
+    <p class="note">A diferença de 10h18 entre o histórico e o saldo atual é apresentada separadamente. Este modelo não presume nem inventa sua origem.</p>
+
+    <footer><span>Documento emitido pelo Sistema Compensa+</span><span>07/10/2026 — 17:24 · Página 1 de 2</span></footer>
+  </section>
+
+  <section class="page">
+    <h2 class="page-heading">Histórico operacional</h2>
+    <p class="page-intro">Registros considerados na formação da carga horária e no Plantão Plus</p>
+
+    <h2 class="section-title">Histórico de plantões trabalhados</h2>
+    <table>
+      <colgroup><col style="width:22%"><col style="width:16%"><col style="width:29%"><col style="width:10%"><col style="width:12%"><col style="width:11%"></colgroup>
+      <thead><tr><th>Período</th><th>Ciclo</th><th>Estabelecimento</th><th>Plantões</th><th>Carga horária</th><th>Observação</th></tr></thead>
+      <tbody>
+        <tr><td>25/09/2026 a 25/10/2026</td><td>Setembro/2026</td><td>Supervisão de Segurança Interna — SSI</td><td>2</td><td>24h00</td><td>—</td></tr>
+        <tr><td>25/08/2026 a 24/09/2026</td><td>Agosto/2026</td><td>Supervisão de Segurança Interna — SSI</td><td>12</td><td>144h00</td><td>—</td></tr>
+        <tr><td>25/07/2026 a 24/08/2026</td><td>Julho/2026</td><td>Supervisão de Segurança Interna — SSI</td><td>19</td><td>228h00</td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <h2 class="section-title">Histórico de Plantão Plus</h2>
+    <div class="plus-summary">
+      <div class="summary-box"><span>Quantidade de Plantões Plus</span><strong>1</strong></div>
+      <div class="summary-box"><span>Total efetivamente aprovado</span><strong>R$ 316,21</strong></div>
+    </div>
+    <table>
+      <colgroup><col style="width:14%"><col style="width:31%"><col style="width:13%"><col style="width:14%"><col style="width:18%"><col style="width:10%"></colgroup>
+      <thead><tr><th>Data</th><th>Estabelecimento</th><th>Situação</th><th>Valor recebido</th><th>Solicitação</th><th>Pagamento</th></tr></thead>
+      <tbody><tr><td>22/08/2026</td><td>Supervisão de Segurança Interna — SSI</td><td class="status">Aprovada</td><td>R$ 316,21</td><td>20/08/2026</td><td>—</td></tr></tbody>
+    </table>
+    <div class="justification"><strong>Justificativa da convocação</strong><br>Baixo efetivo de servidores na data do plantão.</div>
+
+    <h2 class="section-title">Assinaturas</h2>
+    <div class="signatures">
+      <div class="signature"><strong>Ciência do servidor</strong>ABIEDILSON DA SILVA FONTINELE · Matrícula 874460</div>
+      <div class="signature"><strong>Chefia imediata</strong>Nome, matrícula e assinatura</div>
+    </div>
+
+    <footer><span>Documento emitido pelo Sistema Compensa+</span><span>07/10/2026 — 17:24 · Página 2 de 2</span></footer>
+  </section>
+</body>
+</html>
