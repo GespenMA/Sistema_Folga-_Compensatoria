@@ -2,8 +2,10 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
   allowsCompensatoryLoad,
+  buildAnnualStatementSummary,
   formatReportShiftCount,
   getEmployeeStatementTitle,
+  statementMonthHasEvents,
   summarizeApprovedPlusPayments,
 } from './reportCalculations';
 
@@ -87,6 +89,8 @@ export async function generateEmployeeStatementPdf({
   const enjoyedCount = folgas.filter((item) => item.status === 'USUFRUIDA').length;
   const approvedPlus = summarizeApprovedPlusPayments(plusRequests);
   const showCompensatoryLoad = allowsCompensatoryLoad(employee.schedule_types);
+  const statementYear = emittedAt.getFullYear();
+  const annualSummary = buildAnnualStatementSummary(statementYear, folgas, plusRequests);
   const unitName = shifts.find((item) => item.establishments?.nome)?.establishments?.nome
     || plusRequests.find((item) => item.establishments?.nome)?.establishments?.nome
     || folgas.find((item) => item.establishments?.nome)?.establishments?.nome
@@ -101,6 +105,49 @@ export async function generateEmployeeStatementPdf({
     doc.setLineWidth(0.55);
     doc.line(left, y + 1.7, pageWidth - left, y + 1.7);
     return y + 5;
+  };
+
+  const drawAnnualSummary = (startY: number) => {
+    const head = showCompensatoryLoad
+      ? [['Mês', 'Folgas geradas', 'Gozadas', 'Indenizadas', 'Plus aprovados', 'Valor recebido']]
+      : [['Mês', 'Plus aprovados', 'Valor recebido']];
+    const body = annualSummary.map((item) => showCompensatoryLoad
+      ? [
+        item.month,
+        String(item.generatedDays),
+        String(item.enjoyedDays),
+        String(item.indemnifiedDays),
+        String(item.approvedPlus),
+        formatCurrency(item.approvedPlusAmount),
+      ]
+      : [item.month, String(item.approvedPlus), formatCurrency(item.approvedPlusAmount)]);
+
+    autoTable(doc, {
+      startY,
+      head,
+      body,
+      headStyles: { fillColor: navy, textColor: [255, 255, 255], fontSize: 6.2, halign: 'center' },
+      styles: { fontSize: 6.1, cellPadding: 1.25, lineColor: border },
+      columnStyles: showCompensatoryLoad
+        ? {
+          0: { cellWidth: 34 }, 1: { cellWidth: 29, halign: 'center' },
+          2: { cellWidth: 26, halign: 'center' }, 3: { cellWidth: 29, halign: 'center' },
+          4: { cellWidth: 29, halign: 'center' }, 5: { cellWidth: 35, halign: 'right' },
+        }
+        : { 0: { cellWidth: 70 }, 1: { cellWidth: 52, halign: 'center' }, 2: { cellWidth: 60, halign: 'right' } },
+      margin: { left, right: left },
+      didParseCell: (data) => {
+        if (data.section !== 'body') return;
+        if (statementMonthHasEvents(annualSummary[data.row.index])) {
+          data.cell.styles.fillColor = [230, 242, 236];
+          data.cell.styles.textColor = green;
+          data.cell.styles.fontStyle = 'bold';
+        } else if (data.row.index % 2 === 1) {
+          data.cell.styles.fillColor = light;
+        }
+      },
+    });
+    return (doc as any).lastAutoTable.finalY + 7;
   };
 
   if (logo.complete && logo.naturalHeight) doc.addImage(logo, 'PNG', left, 10, 17, 19);
@@ -270,6 +317,8 @@ export async function generateEmployeeStatementPdf({
     doc.text('Este servidor não acumula carga horária e não gera folgas compensatórias.', left + 4, y + 13);
     doc.text('Por isso, saldos, metas, progresso, folgas e memória de carga não são exibidos neste extrato.', left + 4, y + 18);
     y += 30;
+    y = sectionTitle(`Resumo mensal de ${statementYear}`, y);
+    y = drawAnnualSummary(y);
   }
 
   if (showCompensatoryLoad) {
@@ -283,7 +332,9 @@ export async function generateEmployeeStatementPdf({
   doc.setTextColor(...slate);
   doc.text('Registros considerados na formação da carga horária e no Plantão Plus', left, 22);
 
-  y = sectionTitle('Histórico de plantões trabalhados', 30);
+  y = sectionTitle(`Resumo mensal de ${statementYear}`, 30);
+  y = drawAnnualSummary(y);
+  y = sectionTitle('Histórico de plantões trabalhados', y);
   autoTable(doc, {
     startY: y,
     head: [['Período', 'Ciclo', 'Estabelecimento', 'Plantões', 'Carga horária', 'Observação']],

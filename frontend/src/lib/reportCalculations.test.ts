@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   applyApprovedPurchaseToReportRow,
   allowsCompensatoryLoad,
+  buildAnnualStatementSummary,
   formatReportShiftCount,
   getEmployeeStatementTitle,
+  statementMonthHasEvents,
   summarizeApprovedPlusPayments,
 } from './reportCalculations.ts';
 
@@ -81,9 +83,38 @@ test('oculta carga horária quando a escala permite somente Plantão Plus', () =
   assert.equal(allowsCompensatoryLoad(null), true);
 });
 
-test('usa o título solicitado quando a carga horária está desativada', () => {
+test('usa o título institucional em qualquer modalidade de escala', () => {
+  assert.equal(
+    getEmployeeStatementTitle(true),
+    'EXTRATO INDIVIDUAL - FOLGA COMPENSATÓRIA',
+  );
   assert.equal(
     getEmployeeStatementTitle(false),
     'EXTRATO INDIVIDUAL - FOLGA COMPENSATÓRIA',
   );
+});
+
+test('consolida folgas e Plantão Plus por mês no ano do extrato', () => {
+  const summary = buildAnnualStatementSummary(2026, [
+    { status: 'GERADA', generated_at: '2026-01-10T12:00:00Z' },
+    { status: 'USUFRUIDA', generated_at: '2025-12-20T12:00:00Z', used_at: '2026-01-15' },
+    { status: 'INDENIZADA', generated_at: '2026-02-01T12:00:00Z', purchase_requests: { requested_at: '2026-02-20T12:00:00Z' } },
+  ], [
+    { status: 'APROVADA', valor: 316.21, data_plantao: '2026-01-22' },
+    { status: 'SOLICITADA', valor: 500, data_plantao: '2026-01-25' },
+    { status: 'APROVADA', valor: 100, data_plantao: '2025-01-22' },
+  ]);
+
+  assert.deepEqual(summary[0], {
+    month: 'Janeiro',
+    generatedDays: 1,
+    enjoyedDays: 1,
+    indemnifiedDays: 0,
+    approvedPlus: 1,
+    approvedPlusAmount: 316.21,
+  });
+  assert.equal(summary[1].indemnifiedDays, 1);
+  assert.equal(summary.length, 12);
+  assert.equal(statementMonthHasEvents(summary[0]), true);
+  assert.equal(statementMonthHasEvents(summary[2]), false);
 });
