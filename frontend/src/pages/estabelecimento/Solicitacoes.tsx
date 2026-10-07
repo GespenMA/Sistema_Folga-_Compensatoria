@@ -21,6 +21,7 @@ type FolgaDisponivel = {
     nome: string;
     matricula: string;
     positions: { id: string; nome: string; codigo: string };
+    schedule_types?: { id?: string; nome?: string; permite_carga_horaria: boolean } | null;
   };
 };
 
@@ -163,7 +164,8 @@ export const Solicitacoes: React.FC = () => {
             cycles ( nome ),
             employees (
               id, nome, matricula,
-              positions (id, nome, codigo)
+              positions (id, nome, codigo),
+              schedule_types (id, nome, permite_carga_horaria)
             )
           `)
           .eq('status', 'GERADA')
@@ -176,10 +178,14 @@ export const Solicitacoes: React.FC = () => {
           // PostgREST devolve `employees: null` — mesmo a folga em si continuando visível
           // (RLS de compensatory_days usa a coluna fixa). Sem esse filtro, a tela inteira
           // quebrava ao tentar ler f.employees.positions. Ver [[gaps-logica-ciclos]] item 5.
-          const validas = (folgas as unknown as FolgaDisponivel[]).filter(f => f.employees != null);
+          // Além disso, servidores com escala Só Plantão Plus (permite_carga_horaria = false)
+          // não têm direito à compra de compensatória nem gozo — folgas são ocultadas.
+          const validas = (folgas as unknown as FolgaDisponivel[]).filter(
+            f => f.employees != null && f.employees.schedule_types?.permite_carga_horaria !== false
+          );
           const semServidor = folgas.length - validas.length;
           if (semServidor > 0) {
-            console.warn(`${semServidor} folga(s) GERADA ocultada(s): servidor foi transferido para outra unidade e o RLS de employees bloqueia a visualização. IDs:`, (folgas as any[]).filter(f => f.employees == null).map(f => f.id));
+            console.warn(`${semServidor} folga(s) GERADA ocultada(s): servidor transferido ou em escala Só Plantão Plus. IDs:`, (folgas as any[]).filter(f => f.employees == null || f.employees.schedule_types?.permite_carga_horaria === false).map(f => f.id));
           }
           setFolgasDisponiveis(validas);
         }
@@ -278,6 +284,15 @@ export const Solicitacoes: React.FC = () => {
 
   const openCompraModal = async (folga: FolgaDisponivel | any) => {
     try {
+      if (folga.employees?.schedule_types?.permite_carga_horaria === false) {
+        setInfoModal({
+          title: '🔒 Ação Não Permitida',
+          message: 'A escala atual deste servidor está configurada como "Só Plantão Plus" e não permite compra de folga compensatória.',
+          type: 'warning'
+        });
+        return;
+      }
+
       setSelectedFolga(folga);
       setJustificativa('');
       setDataPlantao('');
@@ -319,6 +334,15 @@ export const Solicitacoes: React.FC = () => {
   const handleComprar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFolga || !profile || !activeCycle) return;
+
+    if (selectedFolga?.employees?.schedule_types?.permite_carga_horaria === false) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'A escala atual deste servidor está configurada como "Só Plantão Plus" e não permite compra de folga compensatória.',
+        type: 'warning'
+      });
+      return;
+    }
 
     const valorTotal = valorUnitario * selectedFolga.quantidade_plantoes;
 
@@ -400,6 +424,15 @@ export const Solicitacoes: React.FC = () => {
   };
 
   const openUsufrutoModal = (folga: any) => {
+    if (folga.employees?.schedule_types?.permite_carga_horaria === false) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'A escala atual deste servidor está configurada como "Só Plantão Plus" e não permite registro de gozo de folga.',
+        type: 'warning'
+      });
+      return;
+    }
+
     if (folga.status === 'USUFRUIDA' && !isFolgaInActiveCycle(folga)) {
       setInfoModal({
         title: '🔒 Ação Não Permitida',
@@ -416,6 +449,15 @@ export const Solicitacoes: React.FC = () => {
   const handleRegistrarUsufruto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFolga || !dataUsufruto) return;
+
+    if (selectedFolga?.employees?.schedule_types?.permite_carga_horaria === false) {
+      setInfoModal({
+        title: '🔒 Ação Não Permitida',
+        message: 'A escala atual deste servidor está configurada como "Só Plantão Plus" e não permite registro de gozo de folga.',
+        type: 'warning'
+      });
+      return;
+    }
 
     if (!activeCycle) {
       setInfoModal({

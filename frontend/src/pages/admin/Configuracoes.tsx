@@ -1045,7 +1045,7 @@ export const Configuracoes: React.FC = () => {
 
           <div style={{ margin: 'var(--space-4)', padding: '12px 14px', background: '#f8fafc', border: '1px solid var(--color-divider)', borderRadius: '8px', fontSize: '12px', color: 'var(--color-text)', display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div><strong style={{ color: 'var(--color-accent-700)' }}>🟢 Chave ligada — Carga Horária + Plus:</strong> o servidor acumula carga horária normalmente, pode comprar folga, usufruir e também lançar Plantão Plus.</div>
-            <div><strong style={{ color: 'var(--color-text-muted)' }}>⚪ Chave desligada — Só Plantão Plus:</strong> o servidor não acumula nem gera folga nova por carga horária — só pode receber Plantão Plus. Folgas já geradas antes de desligar continuam válidas normalmente, em qualquer tela.</div>
+            <div><strong style={{ color: 'var(--color-text-muted)' }}>⚪ Chave desligada — Só Plantão Plus:</strong> o servidor só tem acesso a Plantão Plus. Carga horária e folgas compensatórias ficam ocultas e desabilitadas (não permite compra de folga nem registro de gozo).</div>
           </div>
 
           {loadingEscalas ? (

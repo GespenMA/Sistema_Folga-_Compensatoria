@@ -122,16 +122,18 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
 
     // Linha 3: Resumo de Saldos e Indicadores distribuídos horizontalmente
     const yLinha3 = 77;
+    const permiteCargaPDF = employee.schedule_types?.permite_carga_horaria !== false;
+
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.text('Carga Acumulada: ', 18, yLinha3);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${horas}h ${min}m`, 48, yLinha3);
+    doc.text(permiteCargaPDF ? `${horas}h ${min}m` : 'Só Plus', 48, yLinha3);
     
     doc.setFont('helvetica', 'normal');
     doc.text('Folgas Disponíveis: ', 72, yLinha3);
     doc.setFont('helvetica', 'bold');
-    doc.text(`${folgasDisponiveis}`, 101, yLinha3);
+    doc.text(permiteCargaPDF ? `${folgasDisponiveis}` : '—', 101, yLinha3);
 
     doc.setFont('helvetica', 'normal');
     doc.text('Plantão Plus: ', 114, yLinha3);
@@ -359,8 +361,12 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
             </div>
             <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
               <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#10b981', fontWeight: 600, marginBottom: '4px' }}>Folgas</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>{folgas.filter(f => f.status === 'GERADA').length}</div>
-              <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>disponíveis</div>
+              <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>
+                {permiteCargaHoraria ? folgas.filter(f => f.status === 'GERADA').length : '—'}
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                {permiteCargaHoraria ? 'disponíveis' : 'não aplicável'}
+              </div>
             </div>
             <div style={{ background: 'rgba(59,130,246,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(59,130,246,0.2)' }}>
               <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-primary)', fontWeight: 600, marginBottom: '4px' }}>Pl. Plus</div>
@@ -400,11 +406,14 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
             <>
               {/* ABA: Folgas */}
               {tab === 'folgas' && (
+                !permiteCargaHoraria ? (
+                  <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>
+                    ⚡ Este servidor está em escala só-Plantão Plus — folga compensatória não é permitida para este regime.
+                  </div>
+                ) : (
                 <div>
                   <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
-                    {permiteCargaHoraria
-                      ? 'Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)'
-                      : 'Este servidor está em escala só-Plantão Plus e não acumula carga horária nova. As folgas listadas abaixo (se houver) foram geradas antes dessa configuração e continuam válidas normalmente.'}
+                    Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)
                   </div>
                   {folgas.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhuma folga gerada ainda.</div>
@@ -470,6 +479,7 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
                     );
                   })}
                 </div>
+                )
               )}
 
               {/* ABA: Plantões */}

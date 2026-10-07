@@ -422,7 +422,10 @@ export const Folgas: React.FC = () => {
 
   // Métricas KPI
   const totalServidores = employees.length;
-  const folgasProntas = employees.filter(e => (e.folgasDisponiveis || 0) > 0).length;
+  const folgasProntas = employees.filter(e => {
+    if (e.schedule_types?.permite_carga_horaria === false) return false;
+    return (e.folgasDisponiveis || 0) > 0;
+  }).length;
   const proximos = employees.filter(e => {
     if (e.schedule_types?.permite_carga_horaria === false) return false;
     const min = (e.saldo_plantoes * 720) + (e.saldo_minutos || 0);
@@ -430,7 +433,10 @@ export const Folgas: React.FC = () => {
   }).length;
 
   const permiteCargaHorariaDetail = selectedEmployee?.schedule_types?.permite_carga_horaria !== false;
-  const totalFolgas = employees.reduce((acc, e) => acc + (e.folgasDisponiveis || 0), 0);
+  const totalFolgas = employees.reduce((acc, e) => {
+    if (e.schedule_types?.permite_carga_horaria === false) return acc;
+    return acc + (e.folgasDisponiveis || 0);
+  }, 0);
 
   // Lista única de cargos para o filtro
   const cargosDisponiveis = Array.from(
@@ -763,10 +769,8 @@ export const Folgas: React.FC = () => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--space-3)' }}>
               {paginatedFiltered.map((emp, idx) => {
                 const permiteCarga = emp.schedule_types?.permite_carga_horaria !== false;
-                // Folga já gerada é direito adquirido — continua mostrando mesmo se a
-                // escala virar Só-Plus depois. Só o que está em progresso (acumulando
-                // rumo à próxima folga) fica escondido pra quem é Só-Plus.
-                const temFolga = (emp.folgasDisponiveis || 0) > 0;
+                // Servidores em escala só-Plus não exibem folgas disponíveis nem acumulam saldo
+                const temFolga = permiteCarga && (emp.folgasDisponiveis || 0) > 0;
                 const totalMinutos = (emp.saldo_plantoes * 720) + (emp.saldo_minutos || 0);
                 const horas = Math.floor(totalMinutos / 60);
                 const minutosStr = String(totalMinutos % 60).padStart(2, '0');
@@ -1118,8 +1122,12 @@ export const Folgas: React.FC = () => {
                 </div>
                 <div style={{ background: 'rgba(16,185,129,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(16,185,129,0.2)' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#10b981', fontWeight: 600, marginBottom: '4px' }}>Folgas</div>
-                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>{detailFolgas.filter(f => f.status === 'GERADA').length}</div>
-                  <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>disponíveis</div>
+                  <div style={{ fontSize: '22px', fontWeight: 800, color: '#10b981' }}>
+                    {permiteCargaHorariaDetail ? detailFolgas.filter(f => f.status === 'GERADA').length : '—'}
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                    {permiteCargaHorariaDetail ? 'disponíveis' : 'não aplicável'}
+                  </div>
                 </div>
                 <div style={{ background: 'rgba(59,130,246,0.08)', borderRadius: '8px', padding: '10px', textAlign: 'center', border: '1px solid rgba(59,130,246,0.2)' }}>
                   <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-primary)', fontWeight: 600, marginBottom: '4px' }}>Pl. Plus</div>
@@ -1159,11 +1167,14 @@ export const Folgas: React.FC = () => {
                 <>
                   {/* ABA: Folgas */}
                   {detailTab === 'folgas' && (
+                    !permiteCargaHorariaDetail ? (
+                      <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>
+                        ⚡ Este servidor está em escala só-Plantão Plus — folga compensatória não é permitida para este regime.
+                      </div>
+                    ) : (
                     <div>
                       <div style={{ marginBottom: '16px', padding: '12px', background: 'rgba(59,130,246,0.05)', borderRadius: '8px', border: '1px solid rgba(59,130,246,0.1)', fontSize: '12px', color: 'var(--color-text)', lineHeight: 1.5, textAlign: 'justify' }}>
-                        {permiteCargaHorariaDetail
-                          ? 'Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)'
-                          : 'Este servidor está em escala só-Plantão Plus e não acumula carga horária nova. As folgas listadas abaixo (se houver) foram geradas antes dessa configuração e continuam válidas normalmente.'}
+                        Aqui estão listadas todas as folgas adquiridas pelo servidor. O sistema gera uma nova folga automaticamente a cada ciclo concluído, ou seja, sempre que o saldo acumulado atinge a marca de 21 plantões inteiros (252 horas)
                       </div>
                       {detailFolgas.length === 0 ? (
                         <div style={{ textAlign: 'center', padding: '32px', color: 'var(--color-text-muted)' }}>Nenhuma folga gerada ainda.</div>
@@ -1229,6 +1240,7 @@ export const Folgas: React.FC = () => {
                         );
                       })}
                     </div>
+                    )
                   )}
 
                   {/* ABA: Plantões */}
