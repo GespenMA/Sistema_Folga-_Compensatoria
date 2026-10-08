@@ -681,23 +681,49 @@ export const Solicitacoes: React.FC = () => {
   };
 
   const handleCancelRequest = (solicitacao: Solicitacao) => {
-    if (solicitacao.status !== 'SOLICITADA' && solicitacao.status !== 'APROVADA') {
-      setInfoModal({ title: 'Ação Não Permitida', message: 'Apenas solicitações aguardando aprovação ou aprovadas podem ser canceladas.', type: 'warning' });
+    if (!activeCycle || activeCycle.status === 'FECHADO') {
+      setInfoModal({ 
+        title: 'Ação Não Permitida', 
+        message: 'Não é possível cancelar solicitações de um ciclo encerrado (FECHADO).', 
+        type: 'error' 
+      });
       return;
     }
 
+    if (solicitacao.status !== 'SOLICITADA' && solicitacao.status !== 'APROVADA') {
+      setInfoModal({ 
+        title: 'Ação Não Permitida', 
+        message: 'Apenas solicitações aguardando aprovação ou aprovadas podem ser canceladas.', 
+        type: 'warning' 
+      });
+      return;
+    }
+
+    setConfirmReasonValue('');
     setConfirmAction({
       title: 'Cancelar Solicitação',
-      message: 'Tem certeza que deseja cancelar? O orçamento será devolvido e a folga voltará a ficar disponível.',
-      confirmText: 'Sim, Cancelar',
-      onConfirm: () => {
+      message: 'O cancelamento devolverá o valor ao orçamento da unidade e a folga voltará a ficar disponível para o servidor. Justifique o motivo:',
+      confirmText: 'Confirmar Cancelamento',
+      reason: {
+        label: 'Motivo do cancelamento *',
+        placeholder: 'Descreva detalhadamente o motivo do cancelamento...',
+        minLength: 5,
+        maxLength: 500
+      },
+      onConfirm: (reason) => {
         setConfirmAction(null);
-        executeCancelRequest(solicitacao);
+        executeCancelRequest(solicitacao, reason);
       }
     });
   };
 
-  const executeCancelRequest = async (solicitacao: Solicitacao) => {
+  const executeCancelRequest = async (solicitacao: Solicitacao, reason?: string) => {
+    const motivo = (reason || '').trim();
+    if (!motivo) {
+      setInfoModal({ title: 'Justificativa Obrigatória', message: 'É obrigatório informar o motivo do cancelamento.', type: 'warning' });
+      return;
+    }
+
     try {
       // 1. Atualizar a solicitação para CANCELADA
       const { error: reqError } = await supabase
@@ -706,7 +732,7 @@ export const Solicitacoes: React.FC = () => {
           status: 'CANCELADA',
           cancelled_by: profile?.id,
           cancelled_at: new Date().toISOString(),
-          cancellation_reason: 'Cancelado pela unidade'
+          cancellation_reason: motivo
         })
         .eq('id', solicitacao.id);
 
@@ -1411,7 +1437,18 @@ export const Solicitacoes: React.FC = () => {
                           </>
                         )}
                         {(sol.status === 'SOLICITADA' || sol.status === 'APROVADA') && (
-                          <button className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={() => handleCancelRequest(sol)} title="Cancelar Solicitação/Compra">
+                          <button 
+                            className="btn btn-ghost" 
+                            style={{ 
+                              padding: '4px 8px', 
+                              fontSize: '11px',
+                              opacity: !activeCycle || activeCycle.status === 'FECHADO' ? 0.35 : 1,
+                              cursor: !activeCycle || activeCycle.status === 'FECHADO' ? 'not-allowed' : 'pointer'
+                            }} 
+                            disabled={!activeCycle || activeCycle.status === 'FECHADO'}
+                            onClick={() => handleCancelRequest(sol)} 
+                            title={!activeCycle || activeCycle.status === 'FECHADO' ? 'Ciclo encerrado: cancelamento bloqueado' : 'Cancelar Solicitação/Compra'}
+                          >
                             🗑️
                           </button>
                         )}

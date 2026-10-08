@@ -38,7 +38,8 @@ Sistema - Folga Compensatória/
 │   ├── 32_bloqueia_alteracao_gozo_ciclo_fechado.sql
 │   ├── 33_add_escala_rpc_servidores.sql
 │   ├── 34_get_escalas_por_estabelecimento.sql
-│   └── 35_ajusta_ciclo_setembro_data_fim.sql
+│   ├── 35_ajusta_ciclo_setembro_data_fim.sql
+│   └── 36_permite_cancelar_solicitacao_aprovada_com_motivo.sql
 ├── frontend/               # Aplicação React + Vite
 │   ├── src/
 │   │   ├── lib/supabase.ts         # Cliente Supabase singleton
@@ -990,5 +991,8 @@ e só enviados ao GitHub depois do usuário testar localmente em produção.
 - **Memória de Cálculo Linear:** Sequência direta `1. Trabalhado ➔ 2. Baixado ➔ 3. Saldo Atual` para esclarecimento rápido ao servidor e auditoria na unidade prisional.
 - **Transparência nos Cards:** Exibição da justificativa da unidade nos cards individuais de cada folga do modal.
 
-
-
+**Cancelamento de Solicitações Aprovadas com Justificativa e Trava de Ciclo Fechado (Migração 36):**
+- **Liberação de Cancelamento Aprovado:** A trigger `check_cycle_status()` em `purchase_requests` foi atualizada para permitir a transição `APROVADA ➔ CANCELADA` durante ciclos com status `ABERTO` ou `REABERTO`.
+- **Justificativa Obrigatória:** Tanto no banco de dados quanto no frontend (`Solicitacoes.tsx` e `useSolicitacoesData.ts`), o cancelamento exige obrigatoriamente uma justificativa (`cancellation_reason`). O modal de confirmação solicita o motivo antes de efetivar a ação.
+- **Bloqueio Categórico em Ciclos Fechados:** Tentativas de cancelar solicitações de ciclos com status `FECHADO` são estritamente bloqueadas tanto na interface (botão desabilitado) quanto no banco de dados com erro impeditivo.
+- **Devolução Automática de Saldo e Folga:** Ao cancelar, o valor da solicitação retorna imediatamente ao Orçamento Disponível da unidade prisional e, caso se trate de compra de folga compensatória, o direito à folga retorna para o status `GERADA`.

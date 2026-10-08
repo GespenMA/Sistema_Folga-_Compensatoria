@@ -74,7 +74,7 @@ export type SolicitacoesData = {
   aprovar: (solicitacao: Solicitacao) => Promise<ActionResult>;
   aprovarEmLote: (solicitacoes: Solicitacao[]) => Promise<ActionResult>;
   rejeitar: (solicitacao: Solicitacao, motivo: string) => Promise<ActionResult>;
-  cancelar: (solicitacao: Solicitacao) => Promise<ActionResult>;
+  cancelar: (solicitacao: Solicitacao, motivo?: string) => Promise<ActionResult>;
 };
 
 /**
@@ -534,15 +534,24 @@ export const useSolicitacoesData = (establishmentId?: string, userId?: string): 
   );
 
   const cancelar = useCallback<SolicitacoesData['cancelar']>(
-    async (solicitacao) => {
+    async (solicitacao, motivo) => {
       try {
+        if (!activeCycle || activeCycle.status === 'FECHADO') {
+          return { ok: false, message: 'Não é possível cancelar solicitações de um ciclo encerrado (FECHADO).' };
+        }
+
+        const reason = (motivo || '').trim();
+        if (!reason) {
+          return { ok: false, message: 'A justificativa do motivo do cancelamento é obrigatória.' };
+        }
+
         const { error: requestError } = await supabase
           .from('purchase_requests')
           .update({
             status: 'CANCELADA',
             cancelled_by: userId,
             cancelled_at: new Date().toISOString(),
-            cancellation_reason: 'Cancelado pela unidade',
+            cancellation_reason: reason,
           })
           .eq('id', solicitacao.id);
         if (requestError) throw requestError;
