@@ -294,11 +294,12 @@ export const Folgas: React.FC = () => {
     setIsDetailsModalOpen(true);
     setLoadingHistory(true);
     try {
-      // Busca plantões do servidor (todas as entradas de saldo)
+      // Busca plantões do servidor (todas as entradas que contam para saldo)
       const { data: shiftsData } = await supabase
         .from('shifts')
-        .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome)')
+        .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, conta_para_saldo, cycles(nome)')
         .eq('employee_id', emp.id)
+        .eq('conta_para_saldo', true)
         .order('created_at', { ascending: false });
       if (shiftsData) setDetailShifts(shiftsData);
 

@@ -533,8 +533,9 @@ export const ServidorConsultaModal: React.FC<{ employeeId: string | null; onClos
             .single(),
           supabase
             .from('shifts')
-            .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, cycles(nome), establishments(nome)')
+            .select('id, cycle_id, periodo_inicio, periodo_fim, quantidade_plantoes, observacao, created_at, minutos_residuais, conta_para_saldo, cycles(nome), establishments(nome)')
             .eq('employee_id', employeeId)
+            .eq('conta_para_saldo', true)
             .order('created_at', { ascending: false }),
           supabase
             .from('compensatory_days')

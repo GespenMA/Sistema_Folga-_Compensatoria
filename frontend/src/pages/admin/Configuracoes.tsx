@@ -627,7 +627,7 @@ export const Configuracoes: React.FC = () => {
       const { data: ests } = await supabase.from('establishments').select('id, nome');
       const { data: positions } = await supabase.from('positions').select('id, nome, codigo');
       const { data: aliases } = await supabase.from('schedule_type_aliases').select('texto_bruto, schedule_type_id');
-      const { data: scheduleTypesData } = await supabase.from('schedule_types').select('id, nome');
+      const { data: scheduleTypesData } = await supabase.from('schedule_types').select('id, nome, permite_carga_horaria');
 
       const estMap = new Map<string, string>();
       ests?.forEach(e => estMap.set(normalizeStr(e.nome), e.id));
@@ -642,7 +642,11 @@ export const Configuracoes: React.FC = () => {
       aliases?.forEach(a => aliasMap.set(a.texto_bruto, a.schedule_type_id));
 
       const scheduleTypeByNome = new Map<string, string>(); // nome normalizado -> id
-      scheduleTypesData?.forEach(st => scheduleTypeByNome.set(normalizeStr(st.nome), st.id));
+      const scheduleTypePermiteMap = new Map<string, boolean>(); // id -> permite_carga_horaria
+      scheduleTypesData?.forEach(st => {
+        scheduleTypeByNome.set(normalizeStr(st.nome), st.id);
+        scheduleTypePermiteMap.set(st.id, st.permite_carga_horaria !== false);
+      });
 
       let escalasNovas = 0;
 
@@ -688,6 +692,7 @@ export const Configuracoes: React.FC = () => {
               } else {
                 scheduleTypeId = newSt.id as string;
                 scheduleTypeByNome.set(nomeCanonicoNorm, scheduleTypeId);
+                scheduleTypePermiteMap.set(scheduleTypeId, true);
               }
             }
             if (scheduleTypeId) {
@@ -701,6 +706,10 @@ export const Configuracoes: React.FC = () => {
             }
           }
         }
+
+        const permiteCargaHoraria = scheduleTypeId
+          ? (scheduleTypePermiteMap.get(scheduleTypeId) ?? true)
+          : true;
 
         // Busca por matrícula globalmente — matrícula é identificador único do
         // servidor na SEAP, não escopado por estabelecimento. Isso é o que permite
@@ -740,10 +749,11 @@ export const Configuracoes: React.FC = () => {
           }
         }
 
-        // Calcular plantões com saldo base correto
-        const totalMinutos = row.minutosNovos + saldoMinutosBase;
+        // Calcular plantões com saldo base correto (congelando saldo_minutos se a escala for Só Plantão Plus)
+        const totalMinutos = permiteCargaHoraria ? (row.minutosNovos + saldoMinutosBase) : row.minutosNovos;
         const plantoesTotal = Math.floor(totalMinutos / MINUTOS_POR_PLANTAO);
-        const novoSaldoMinutos = totalMinutos % MINUTOS_POR_PLANTAO;
+        const minutosResiduaisShift = permiteCargaHoraria ? (totalMinutos % MINUTOS_POR_PLANTAO) : 0;
+        const novoSaldoMinutos = permiteCargaHoraria ? minutosResiduaisShift : saldoMinutosBase;
 
         // INSERT/UPDATE explícito (não upsert) — cobre atualização normal E
         // transferência sem depender de qual constraint única existe no momento
@@ -802,7 +812,7 @@ export const Configuracoes: React.FC = () => {
             periodo_inicio: activeCycleForImport.data_inicio,
             periodo_fim: activeCycleForImport.data_fim,
             quantidade_plantoes: plantoesTotal,
-            minutos_residuais: novoSaldoMinutos,
+            minutos_residuais: minutosResiduaisShift,
           });
           if (!shiftErr) shiftsInseridos++;
           else erros.push(`Erro ao inserir plantões de ${row.nome}: ${shiftErr.message}`);
